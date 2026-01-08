@@ -3,129 +3,113 @@ import pandas as pd
 import numpy as np
 import math
 
-st.set_page_config(page_title="Magelan242 ELR Precision", layout="wide")
+st.set_page_config(page_title="Magelan242 Moving Target", layout="wide")
 
-# --- СТИЛІЗАЦІЯ ---
+# --- МАТЕМАТИЧНЕ ЯДРО ---
+def calculate_all_v51(p, dist, target_speed_kmh, target_angle_deg):
+    if dist <= 0: return {"v_mil": 0, "h_mil": 0, "lead_mil": 0, "v_at": p['v0'], "e": 0, "tof": 0}
+    
+    # Балістика
+    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+    k = 0.5 * rho * (1/p['bc']) * 0.00052 * (0.91 if p['model'] == "G7" else 1.0)
+    tof = (math.exp(k * dist) - 1) / (k * p['v0'])
+    v_dist = p['v0'] * math.exp(-k * dist)
+    
+    # Вертикаль
+    t_z = (math.exp(k * p['zero']) - 1) / (k * p['v0'])
+    drop = 0.5 * 9.806 * (tof**2)
+    drop_z = 0.5 * 9.806 * (t_z**2)
+    y_m = -(drop - (drop_z + p['sh']/100) * (dist / p['zero']) + p['sh']/100)
+    v_mil = abs((y_m * 100) / (dist / 10) / 0.1)
+    
+    # Вітер (горизонт)
+    w_rad = math.radians(p['w_hour'] * 30)
+    wind_drift = p['w_speed'] * math.sin(w_rad) * (tof - (dist/p['v0']))
+    h_mil_wind = (wind_drift * 100) / (dist / 10) / 0.1
+    
+    # Упередження (Moving Target Lead)
+    # Швидкість цілі в м/с
+    v_target_ms = target_speed_kmh / 3.6
+    # Ефективна поперечна швидкість (V * sin(angle))
+    v_cross = v_target_ms * math.sin(math.radians(target_angle_deg))
+    # Зміщення цілі за час польоту кулі
+    lead_m = v_cross * tof
+    lead_mil = (lead_m * 100) / (dist / 10) / 0.1
+    
+    return {
+        "v_mil": round(v_mil, 1),
+        "h_mil_wind": round(h_mil_wind, 1),
+        "lead_total_mil": round(abs(h_mil_wind + lead_mil), 1),
+        "pure_lead": round(abs(lead_mil), 1),
+        "v_at": int(v_dist),
+        "e": int((p['weight'] * 0.0000648 * v_dist**2) / 2),
+        "tof": round(tof, 3)
+    }
+
+# --- ІНТЕРФЕЙС ---
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; color: white; }
-    .header-box { background: linear-gradient(90deg, #1a1a1a 0%, #C62828 100%); padding: 15px; border-radius: 5px; margin-bottom: 20px; border-right: 5px solid white; text-align: right; }
+    .header-box { background: linear-gradient(90deg, #1a1a1a 0%, #C62828 100%); padding: 15px; border-radius: 5px; margin-bottom: 20px; text-align: right; border-right: 5px solid white; }
     .hud-card { background-color: #1E1E1E; border-top: 4px solid #C62828; padding: 15px; border-radius: 5px; text-align: center; margin-bottom: 10px; }
     .hud-label { color: #888; font-size: 11px; text-transform: uppercase; font-weight: bold; }
-    .hud-value { color: #FFF; font-size: 24px; font-weight: 900; }
-    .section-head { color: #C62828; font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #444; text-transform: uppercase; }
+    .hud-value { color: #FFF; font-size: 26px; font-weight: 900; }
+    .lead-box { border: 2px solid #00FF00 !important; background-color: #0a1f0a !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ПОВНА ФІЗИЧНА МОДЕЛЬ ---
-def calculate_precision_ballistics(p):
-    d = p['dist']
-    lat_rad = math.radians(p['lat'])
-    azimuth_rad = math.radians(p['azimuth'])
-    
-    # 1. Атмосфера та щільність
-    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
-    k = 0.5 * rho * (1/p['bc']) * 0.00052 * (0.91 if p['model'] == "G7" else 1.0)
-    
-    # 2. Час польоту та швидкість
-    tof = (math.exp(k * d) - 1) / (k * p['v0']) if d > 0 else 0
-    v_dist = p['v0'] * math.exp(-k * d)
-    
-    # 3. Вертикальне падіння (Gravity + Angle)
-    cos_angle = math.cos(math.radians(p['angle']))
-    t_z = (math.exp(k * p['zero']) - 1) / (k * p['v0'])
-    drop = 0.5 * 9.806 * (tof**2) * cos_angle
-    drop_z = 0.5 * 9.806 * (t_z**2)
-    y_m = -(drop - (drop_z + p['sh']/100) * (d / p['zero']) + p['sh']/100)
+st.markdown('<div class="header-box"><h1>MAGELAN242 | DYNAMIC TARGET SYSTEM</h1></div>', unsafe_allow_html=True)
 
-    # 4. Вітер та Аеродинамічний стрибок
-    w_rad = math.radians(p['w_hour'] * 30)
-    wind_x = p['w_speed'] * math.sin(w_rad) # Боковий вітер
-    wind_drift = wind_x * (tof - (d/p['v0']))
-    # Аеродинамічний стрибок (вертикальне зміщення від бокового вітру)
-    aj_drift = 0.001 * wind_x * (d / 100) 
+c_ammo, c_target, c_res = st.columns([1, 1, 1.2])
 
-    # 5. Деривація (Spin Drift)
-    # Спрощена формула для стабілізованої кулі
-    derivation = 0.06 * (p['twist'] / 10) * (d / 100)**1.5
+with c_ammo:
+    st.subheader("🛠 Налаштування")
+    v0 = st.number_input("V0 (м/с)", 820)
+    bc = st.number_input("БК (G7)", 0.450, format="%.3f")
+    weight = st.number_input("Вага (гран)", 175.0)
+    dist = st.slider("Дистанція (м)", 0, 1500, 500)
     
-    # 6. Ефект Коріоліса (Земля)
-    omega = 7.292115e-5 # Кутова швидкість Землі
-    coriolis_hor = -2 * omega * tof * wind_x * math.sin(lat_rad) # Спрощено
-    coriolis_vert = 2 * omega * d * p['v0'] * math.cos(lat_rad) * math.sin(azimuth_rad) / 9.806 * 0.01
+    with st.expander("Атмосфера та зброя"):
+        temp = st.number_input("Темп (°C)", 15)
+        press = st.number_input("Тиск (гПа)", 1013)
+        sh = st.number_input("Висота прицілу (см)", 5.0)
+        zero = st.number_input("Нуль (м)", 100)
 
-    # 7. Підсумок MIL
-    total_v_m = y_m + aj_drift + coriolis_vert
-    total_h_m = wind_drift + derivation + coriolis_hor
+with c_target:
+    st.subheader("🏃 Рух цілі")
+    t_speed = st.number_input("Швидкість цілі (км/год)", 0.0, 40.0, 5.0)
+    t_angle = st.slider("Кут руху цілі (°)", 0, 90, 90, help="90° - рух перпендикулярно стрільцю, 0° - на або від стрільця")
     
-    v_mil = abs((total_v_m * 100) / (d / 10) / 0.1) if d > 0 else 0
-    h_mil = abs((total_h_m * 100) / (d / 10) / 0.1) if d > 0 else 0
-    
-    # Гіроскопічна стабільність (Miller)
-    sg = (30 * p['weight']) / ( (p['twist']/p['cal'])**2 * p['cal']**3 * p['bullet_len'] * (1 + p['bullet_len']**2) ) * (p['v0'] / 853.44)**(1/3)
-
-    return {"v_mil": round(v_mil, 1), "h_mil": round(h_mil, 1), "v_at_dist": int(v_dist), "energy": int((p['weight'] * 0.0000648 * v_dist**2) / 2), "tof": round(tof, 3), "sg": round(sg, 2)}
-
-# --- ІНТЕРФЕЙС ---
-st.markdown('<div class="header-box"><h1>MAGELAN242 | ELR PRECISION SYSTEM</h1></div>', unsafe_allow_html=True)
-
-c1, c2, c3 = st.columns([1, 1, 1.5])
-
-with c1:
-    st.markdown('<div class="section-head">📦 Специфікації набою</div>', unsafe_allow_html=True)
-    p_v0 = st.number_input("Швидкість V0 (м/с)", value=860)
-    p_bc = st.number_input("БК (G7)", value=0.354, format="%.3f")
-    p_weight = st.number_input("Вага кулі (гран)", value=215.0)
-    p_cal = st.number_input("Калібр (дюйм)", value=0.308, format="%.3f")
-    p_len = st.number_input("Довжина кулі (дюйм)", value=1.60, format="%.3f")
-    
-    st.markdown('<div class="section-head">🔫 Параметри зброї</div>', unsafe_allow_html=True)
-    p_twist = st.number_input("Твіст ствола 1:", value=10.0)
-    p_sh = st.number_input("Висота прицілу (см)", value=5.0)
-    p_zero = st.number_input("Дистанція пристрілки (м)", value=100)
-
-with c2:
-    st.markdown('<div class="section-head">🌍 Зовнішні фактори</div>', unsafe_allow_html=True)
-    p_temp = st.slider("Температура (°C)", -30, 50, 15)
-    p_press = st.slider("Тиск (гПа)", 800, 1100, 1013)
-    p_w_speed = st.slider("Вітер (м/с)", 0.0, 15.0, 4.0)
-    p_w_hour = st.slider("Вітер (год)", 1, 12, 3)
-    p_angle = st.slider("Кут цілі (°)", -45, 45, 0)
-    
-    st.markdown('<div class="section-head">🗺 Ефект Коріоліса</div>', unsafe_allow_html=True)
-    p_lat = st.number_input("Широта (0-90°)", value=50)
-    p_azimuth = st.number_input("Азимут стрільби (0-360°)", value=0)
-
-with c3:
-    st.markdown('<div class="section-head">🎯 Розрахунок поправки</div>', unsafe_allow_html=True)
-    p_dist = st.slider("Дистанція до цілі (м)", 0, 2000, 1000, step=10)
-    
-    data = {
-        'v0': p_v0, 'bc': p_bc, 'weight': p_weight, 'cal': p_cal, 'bullet_len': p_len,
-        'twist': p_twist, 'sh': p_sh, 'zero': p_zero, 'temp': p_temp, 'press': p_press,
-        'w_speed': p_w_speed, 'w_hour': p_w_hour, 'angle': p_angle, 'dist': p_dist,
-        'lat': p_lat, 'azimuth': p_azimuth, 'model': 'G7'
-    }
-    
-    res = calculate_precision_ballistics(data)
-    
-    # HUD
-    h1, h2 = st.columns(2)
-    h1.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль MIL</div><div class="hud-value">↑ {res["v_mil"]}</div></div>', unsafe_allow_html=True)
-    h2.markdown(f'<div class="hud-card"><div class="hud-label">Горизонт MIL</div><div class="hud-value">↔ {res["h_mil"]}</div></div>', unsafe_allow_html=True)
-    
-    h3, h4, h5 = st.columns(3)
-    h3.markdown(f'<div class="hud-card"><div class="hud-label">ToF</div><div class="hud-value" style="font-size:18px;">{res["tof"]} с</div></div>', unsafe_allow_html=True)
-    h4.markdown(f'<div class="hud-card"><div class="hud-label">Стабільність</div><div class="hud-value" style="font-size:18px; color:{"#00FF00" if 1.4 <= res["sg"] <= 2.0 else "#FFD700"}">{res["sg"]}</div></div>', unsafe_allow_html=True)
-    h5.markdown(f'<div class="hud-card"><div class="hud-label">Енергія</div><div class="hud-value" style="font-size:18px;">{res["energy"]} Дж</div></div>', unsafe_allow_html=True)
-
     st.divider()
-    st.subheader("📊 Аналіз дистанції")
-    steps = [p_dist-200, p_dist-100, p_dist, p_dist+100, p_dist+200]
-    table = []
-    for s in steps:
-        if s >= 0:
-            data['dist'] = s
-            r = calculate_precision_ballistics(data)
-            table.append({"Дист": s, "Вертикаль": r['v_mil'], "Горизонт": r['h_mil'], "Швидкість": r['v_at_dist']})
-    st.table(pd.DataFrame(table))
+    st.subheader("💨 Вітер")
+    w_s = st.slider("Швидкість вітру (м/с)", 0.0, 15.0, 3.0)
+    w_h = st.slider("Напрямок (год)", 1, 12, 3)
+
+# ОБЧИСЛЕННЯ
+p = {'v0': v0, 'bc': bc, 'weight': weight, 'temp': temp, 'press': press, 'sh': sh, 'zero': zero, 'w_speed': w_s, 'w_hour': w_h, 'model': 'G7'}
+res = calculate_all_v51(p, dist, t_speed, t_angle)
+
+with c_res:
+    st.subheader("🎯 Результат")
+    st.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль (Падіння)</div><div class="hud-value">↑ {res["v_mil"]} MIL</div></div>', unsafe_allow_html=True)
+    
+    # Виділяємо упередження зеленим
+    st.markdown(f'<div class="hud-card lead-box"><div class="hud-label" style="color:#00FF00">Сумарне упередження (MIL)</div><div class="hud-value" style="color:#00FF00">↔ {res["lead_total_mil"]}</div></div>', unsafe_allow_html=True)
+    
+    st.caption(f"В т.ч. чисте упередження на рух: {res['pure_lead']} MIL")
+    
+    st.divider()
+    c_e, c_v = st.columns(2)
+    c_e.metric("Енергія", f"{res['e']} Дж")
+    c_v.metric("V у цілі", f"{res['v_at']} м/с")
+    st.write(f"⏱ Час польоту: **{res['tof']} с**")
+
+st.divider()
+st.subheader("📊 Таблиця винесення (MIL)")
+# Швидка таблиця для різних швидкостей цілі
+speeds = [0, 5, 10, 15, 20]
+t_data = []
+for s in speeds:
+    r = calculate_all_v51(p, dist, s, t_angle)
+    t_data.append({"Швидкість цілі (км/год)": s, "Сумарне винесення (↔)": r['lead_total_mil'], "Час польоту (с)": r['tof']})
+st.table(pd.DataFrame(t_data))
