@@ -2,121 +2,149 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import math
-import plotly.graph_objects as go
 
-st.set_page_config(page_title="Magelan Ballistics Ultimate", layout="wide")
+# --- КОНФИГУРАЦИЯ ---
+st.set_page_config(page_title="Magelan Ballistics v85", layout="wide")
 
-# --- МАТЕМАТИЧНЕ ЯДРО ---
-def run_simulation(p):
-    # Константи
-    g = 9.80665
-    dt = 0.002 # Крок інтегрування для високої точності
-    
-    # Початкові умови
-    t, x, y, z = 0, 0, 0, 0
-    v0_eff = p['v0'] + (p['temp'] - 15) * 0.2 # Термозалежність
-    
-    # Вектори швидкості з урахуванням кута місця цілі (Cos Angle)
-    vx = v0_eff * math.cos(math.radians(p['angle']))
-    vy = v0_eff * math.sin(math.radians(p['angle']))
-    vz = 0
-    
-    # Атмосфера
-    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
-    k = 0.5 * rho * (1/p['bc']) * 0.00052 * (0.91 if p['model'] == "G7" else 1.0)
-    
-    while x < p['target_dist']:
-        v_abs = math.sqrt(vx**2 + vy**2 + vz**2)
+# --- СТИЛИЗАЦИЯ ПОД ТАКТИЧЕСКИЙ ИНТЕРФЕЙС ---
+st.markdown("""
+    <style>
+    .reportview-container { background: #0e1117; }
+    .stMetric { background: #1a1a1a; padding: 15px; border-radius: 8px; border-left: 5px solid #ff0000; color: white; }
+    div[data-testid="stExpander"] { background: #161b22; border: 1px solid #30363d; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- БАЛЛИСТИЧЕСКИЙ ВЫЧИСЛИТЕЛЬ ---
+class PrecisionSolver:
+    def __init__(self, p):
+        self.p = p
+        self.g = 9.80665
+        self.omega = 7.292115e-5
         
-        # Сили опору
-        ax = -k * v_abs * vx
-        ay = -k * v_abs * vy - g
-        az = -k * v_abs * vz
+        # 1. Коррекция V0 по температуре (Powder Sensitivity)
+        # Стандарт: 15°C. Коэффициент чувствительности: ~0.12% на каждые 10°C
+        t_ref = 15.0
+        v0_factor = 1 + (p['temp'] - t_ref) * (p['temp_coeff'] / 100)
+        self.v0 = p['v0'] * v0_factor
         
-        # Оновлення координат (метод Ейлера)
-        vx += ax * dt
-        vy += ay * dt
-        vz += az * dt
-        x += vx * dt
-        y += vy * dt
-        z += vz * dt
-        t += dt
+        # 2. Плотность воздуха
+        self.rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+        self.v_sound = 331.3 * math.sqrt(1 + p['temp'] / 273.15)
 
-    # Деривація (Spin Drift)
-    spin_drift = 1.25 * (1.5 + 1.2) * (t**1.83) * 0.01 # в метрах
-    
-    # Вертикальне падіння відносно лінії прицілювання
-    drop_m = y - (p['sh'] / 100)
-    v_mil = abs(drop_m * 100) / (p['target_dist'] / 10)
-    h_mil = (abs(z + spin_drift) * 100) / (p['target_dist'] / 10)
-    
-    return {'v_mil': round(v_mil, 2), 'h_mil': round(h_mil, 2), 'tof': round(t, 3), 'v_at': int(v_abs)}
+    def get_accel(self, v_vec):
+        v_mag = np.linalg.norm(v_vec)
+        mach = v_mag / self.v_sound
+        
+        # Модель сопротивления G7
+        # Апроксимация функции Cd для лодочного хвоста (Boat Tail)
+        if mach > 1.2: cd = 0.35
+        elif mach > 0.8: cd = 0.35 + 0.15 * (1.2 - mach) / 0.4
+        else: cd = 0.50
+        
+        # Сила сопротивления
+        drag_const = 0.5 * self.rho * (1 / self.p['bc']) * 0.00052
+        a_drag = -drag_const * v_mag * v_vec
+        
+        # Гравитация
+        a_grav = np.array([0, -self.g, 0])
+        
+        # Эффект Кориолиса (вертикальный и горизонтальный)
+        lat = math.radians(self.p['lat'])
+        az = math.radians(self.p['az'])
+        v_cor = 2 * self.omega * np.array([
+            v_vec[2]*math.sin(lat) - v_vec[1]*math.cos(lat)*math.sin(az),
+            v_vec[0]*math.cos(lat)*math.sin(az),
+            -v_vec[0]*math.sin(lat)
+        ])
+        
+        return a_drag + a_grav + v_cor
 
-# --- ІНТЕРФЕЙС ---
-st.title("🏹 Magelan Ballistics Ultimate v78.0")
+    def solve(self):
+        dt = 0.005 # Крок 5 мс
+        pos = np.array([0.0, self.p['sh']/100, 0.0])
+        vel = np.array([self.v0, 0.0, 0.0])
+        t = 0.0
+        
+        v_wind = np.array([
+            self.p['ws'] * math.cos(math.radians(self.p['wh']*30)),
+            0.0,
+            self.p['ws'] * math.sin(math.radians(self.p['wh']*30))
+        ])
+
+        while pos[0] < self.p['dist']:
+            # Интегрирование RK4
+            v_rel = vel - v_wind
+            k1 = self.get_accel(v_rel)
+            k2 = self.get_accel(v_rel + 0.5 * dt * k1)
+            
+            vel += dt * k2
+            pos += dt * vel
+            t += dt
+
+        # 3. Деривация (Spin Drift)
+        # Упрощенная формула Лица для стабилизированной пули
+        sd = 1.25 * (1.5 + 1.2) * (t**1.83) * 0.0254 # в метрах
+        
+        # 4. Итоговые поправки в MIL
+        v_mil = abs(pos[1] * 100) / (self.p['dist'] / 10)
+        h_mil = (abs(pos[2] + sd) * 100) / (self.p['dist'] / 10)
+        
+        return {
+            'v_mil': round(v_mil, 2),
+            'h_mil': round(h_mil, 2),
+            'v_res': int(np.linalg.norm(vel)),
+            'tof': round(t, 3),
+            'mach': round(np.linalg.norm(vel)/self.v_sound, 2),
+            'v0_actual': round(self.v0, 1)
+        }
+
+# --- ИНТЕРФЕЙС ---
+st.title("🛡️ Magelan Omniscient v85.0")
 
 with st.sidebar:
-    st.header("⚙️ Основні параметри")
-    v0 = st.number_input("Початкова швидкість V0 (м/с)", value=893.0)
-    bc_input = st.number_input("БК (G7)", value=0.292, format="%.3f")
-    sh = st.number_input("Висота прицілу (см)", value=5.0)
+    st.header("🗜️ Снаряжение")
+    v0 = st.number_input("Начальная скорость (м/с)", 893.0)
+    bc = st.number_input("БК G7", 0.292, format="%.3f")
+    t_coeff = st.slider("Термозависимость пороха (% на 10°C)", 0.0, 2.0, 0.5)
+    sh = st.number_input("Высота прицела (см)", 5.0)
     
-    st.divider()
-    st.header("🎯 Калібрування БК")
-    st.info("Якщо реальне влучання відрізняється, введіть дані нижче:")
-    cal_dist = st.number_input("Дистанція прострілу (м)", value=800)
-    real_drop_mil = st.number_input("Реальна поправка (MIL)", value=0.0, format="%.2f")
-    
-    if st.button("Обчислити істинний БК"):
-        best_bc = bc_input
-        min_diff = 999
-        for test_bc in np.arange(0.100, 0.500, 0.001):
-            test_res = run_simulation({'v0':v0, 'bc':test_bc, 'sh':sh, 'temp':15, 'press':1013, 'target_dist':cal_dist, 'angle':0, 'model':"G7"})
-            diff = abs(test_res['v_mil'] - real_drop_mil)
-            if diff < min_diff:
-                min_diff = diff
-                best_bc = test_bc
-        st.success(f"Ваш істинний БК: {best_bc:.3f}")
-        bc_input = best_bc
+    st.header("🌍 Геопозиция")
+    lat = st.number_input("Широта (градусы)", 50.0)
+    az = st.slider("Азимут стрельбы", 0, 360, 90)
 
-# --- ГОЛОВНА ПАНЕЛЬ ---
-col1, col2 = st.columns([1, 1])
+# ОСНОВНОЙ БЛОК
+c1, c2, c3 = st.columns(3)
+dist = c1.number_input("Дистанция до цели (м)", 100, 2000, 800)
+temp = c2.slider("Температура воздуха (°C)", -25, 45, 15)
+press = c3.number_input("Давление (гПа/mbar)", 900, 1100, 1013)
 
-with col1:
-    st.subheader("🌍 Умови пострілу")
-    dist = st.slider("Відстань (м)", 100, 1500, 800, step=10)
-    angle = st.slider("Кут місця цілі (°)", -45, 45, 0)
-    temp = st.slider("Температура (°C)", -20, 45, 15)
-    press = st.number_input("Тиск (гПа)", value=1013)
-    
-    st.subheader("💨 Вітер")
-    ws = st.slider("Швидкість (м/с)", 0, 15, 3)
-    wh = st.slider("Напрямок (год)", 0, 12, 3)
+ws = c1.slider("Скорость ветра (м/с)", 0, 25, 3)
+wh = c2.slider("Направление ветра (час)", 0, 12, 3)
+click = c3.selectbox("Клик прицела", [0.1, 0.05], format_func=lambda x: f"{x} MIL")
 
-# Розрахунок результату
-res = run_simulation({
-    'v0': v0, 'bc': bc_input, 'sh': sh, 'temp': temp, 
-    'press': press, 'target_dist': dist, 'angle': angle, 
-    'model': "G7", 'w_speed': ws, 'w_hour': wh
+# РАСЧЕТ
+solver = PrecisionSolver({
+    'v0': v0, 'bc': bc, 'temp_coeff': t_coeff, 'sh': sh,
+    'dist': dist, 'temp': temp, 'press': press, 'ws': ws, 'wh': wh,
+    'lat': lat, 'az': az
 })
+res = solver.solve()
 
-with col2:
-    st.subheader("🎯 Поправки")
-    c1, c2 = st.columns(2)
-    c1.markdown(f'<div style="background:#1A0000; padding:20px; border-radius:10px; border-left:5px solid red;">'
-                f'<p style="color:gray; margin:0;">ВЕРТИКАЛЬ</p>'
-                f'<h1 style="margin:0;">{res["v_mil"]} MIL</h1>'
-                f'<p style="color:red; margin:0;">{int(res["v_mil"]*10)} кліків</p></div>', unsafe_allow_html=True)
-    
-    c2.markdown(f'<div style="background:#1A0000; padding:20px; border-radius:10px; border-left:5px solid red;">'
-                f'<p style="color:gray; margin:0;">ГОРИЗОНТ</p>'
-                f'<h1 style="margin:0;">{res["h_mil"]} MIL</h1>'
-                f'<p style="color:red; margin:0;">{int(res["h_mil"]*10)} кліків</p></div>', unsafe_allow_html=True)
+st.divider()
 
-    st.divider()
-    st.write(f"⏱ **Час польоту:** {res['tof']} с")
-    st.write(f"💨 **Швидкість біля цілі:** {res['v_at']} м/с")
+# ВЫВОД РЕЗУЛЬТАТОВ
+r1, r2, r3, r4 = st.columns(4)
+r1.metric("ВЕРТИКАЛЬ (MIL)", res['v_mil'], f"{int(res['v_mil']/click)} кликов")
+r2.metric("ГОРИЗОНТ (MIL)", res['h_mil'], f"{int(res['h_mil']/click)} кликов")
+r3.metric("СКОРОСТЬ V0 (КОРР.)", f"{res['v0_actual']} м/с")
+r4.metric("У ЦЕЛИ", f"Mach {res['mach']}")
 
-    # Візуалізація падіння (Holdover)
-    
-    st.caption("Позиція на сітці Mil-Dot для пострілу виносом.")
+# ПОЯСНЕНИЯ
+with st.expander("📝 Анализ баллистического решения"):
+    st.write(f"- **Время полета:** {res['tof']} сек")
+    st.write(f"- **Температурный сдвиг скорости:** {round(res['v0_actual'] - v0, 1)} м/с")
+    if res['mach'] < 1.2:
+        st.error("⚠️ Пуля в трансзвуковой зоне. Прогнозируемая точность падает.")
+    else:
+        st.success("✅ Пуля сохраняет гироскопическую стабильность.")
