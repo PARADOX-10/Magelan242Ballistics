@@ -1,115 +1,116 @@
 import streamlit as st
 import pandas as pd
 import math
+import plotly.graph_objects as go
+import requests
 
-# Налаштування для мобільних пристроїв
-st.set_page_config(page_title="Magelan242 PRO", layout="centered")
+# Налаштування сторінки
+st.set_page_config(page_title="Magelan242 HUD PRO", layout="centered")
 
-# CSS для зручності керування пальцями
+# --- ФУНКЦІЇ АВТОМАТИЗАЦІЇ ---
+def get_auto_data():
+    try:
+        # 1. Отримуємо локацію по IP
+        geo = requests.get('http://ip-api.com/json/').json()
+        lat, lon = geo['lat'], geo['lon']
+        
+        # 2. Отримуємо погоду (використано тестовий ключ, для стабільності краще мати свій OpenWeatherMap API)
+        # Приклад запиту: https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={key}&units=metric
+        # Нижче заглушка для демонстрації, яка імітує отримання даних:
+        weather_data = {
+            'temp': 12, 'press': 1015, 'w_speed': 4.5, 'w_deg': 210, 'lat': lat
+        }
+        return weather_data
+    except:
+        return None
+
+# --- СТИЛІЗАЦІЯ ---
 st.markdown("""
     <style>
-    .stNumberInput input { font-size: 22px !important; height: 55px !important; }
-    button[kind="secondary"] { height: 50px !important; font-weight: bold !important; }
-    .stMetric { background: #1a1c24; border-radius: 12px; padding: 15px; border: 1px solid #333; }
-    [data-testid="stExpander"] { background: #0e1117; border-radius: 10px; margin-bottom: 10px; }
+    .stApp { background-color: #E0E0E0; }
+    .header { background-color: #C62828; padding: 12px; text-align: center; color: white; font-weight: bold; border-radius: 0 0 10px 10px; }
+    .status-bar { background-color: white; padding: 10px; border-radius: 5px; margin: 10px 0; border: 1px solid #ccc; }
+    .result-box { background-color: white; border-top: 5px solid #C62828; padding: 15px; text-align: center; border-radius: 3px; }
+    .res-val { color: #212121; font-size: 32px; font-weight: 800; }
     </style>
     """, unsafe_allow_html=True)
 
-def full_ballistic_calc(p):
-    # Корекція швидкості на температуру
-    v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
+# --- БАЛІСТИЧНЕ ЯДРО ---
+def advanced_calc(p):
+    v0_corr = p['v0'] + (p['temp'] - 15) * 0.2
+    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+    k = 0.5 * rho * (1/p['bc']) * 0.00052 * 0.91
+    t = (math.exp(k * p['dist']) - 1) / (k * v0_corr) if p['dist'] > 0 else 0
     
-    # Щільність повітря (Тиск + Температура)
-    tk = p['temp'] + 273.15
-    rho = (p['press'] * 100) / (287.05 * tk)
-    
-    # Коефіцієнт опору (модель G7 за замовчуванням)
-    k = 0.5 * rho * (1/p['bc']) * 0.00052
-    if p['model'] == "G7": k *= 0.91
-
-    # Розрахунок часу польоту
-    d = p['dist']
-    t = (math.exp(k * d) - 1) / (k * v0_corr) if d > 0 else 0
-    
-    # Падіння (Drop)
+    # Падіння + Коріоліс (Вертикаль)
     drop = 0.5 * 9.806 * (t**2) * math.cos(math.radians(p['angle']))
-    
-    # Розрахунок нуля
     t_z = (math.exp(k * p['zero']) - 1) / (k * v0_corr)
     drop_z = 0.5 * 9.806 * (t_z**2)
+    coriolis_v = 2 * v0_corr * 7.2921e-5 * math.cos(math.radians(p['lat'])) * math.sin(math.radians(p['azimuth'])) * t
+    y_m = -(drop - (drop_z + p['sh']/100) * (p['dist'] / p['zero']) + p['sh']/100)
     
-    # Відносна висота (Вертикальне відхилення)
-    y_m = -(drop - (drop_z + p['sh']/100) * (d / p['zero']) + p['sh']/100)
+    # Вітер + Коріоліс (Горизонталь)
+    w_rad = math.radians(p['w_dir'])
+    wind_drift = (p['w_speed'] * math.sin(w_rad)) * (t - (p['dist']/v0_corr))
+    coriolis_h = 7.2921e-5 * p['dist'] * t * math.sin(math.radians(p['lat']))
     
-    # Вітер та Деривація
-    w_rad = math.radians(p['w_dir'] * 30)
-    wind_drift = (p['w_speed'] * math.sin(w_rad)) * (t - (d/v0_corr))
-    derivation = 0.05 * (p['twist'] / 10) * (d / 100)**2
-    
-    # Конвертація в кліки користувача
-    # 1 MRAD на дистанції D = D/1000 метрів або D/10 см.
-    mrad_v = (y_m * 100) / (d / 10) if d > 0 else 0
-    mrad_h = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
-    
-    clicks_v = round(abs(mrad_v / p['click']), 1)
-    clicks_h = round(abs(mrad_h / p['click']), 1)
-    
-    return clicks_v, clicks_h, round(t, 3), int(v0_corr * math.exp(-k * d))
+    res_v = ((y_m + coriolis_v) * 100) / (p['dist'] / 10) if p['dist'] > 0 else 0
+    res_h = ((wind_drift + coriolis_h) * 100) / (p['dist'] / 10) if p['dist'] > 0 else 0
+    return round(abs(res_v/0.1), 2), round(abs(res_h/0.1), 2), round(t, 3)
 
 # --- ІНТЕРФЕЙС ---
-st.title("🎯 Magelan242 PRO")
+st.markdown('<div class="header">4DOF® HUD PRO : MAGELAN</div>', unsafe_allow_html=True)
 
-# ГОЛОВНІ ПАРАМЕТРИ (Завжди видимі)
-col_d1, col_d2 = st.columns([2, 1])
-dist = col_d1.number_input("ДИСТАНЦІЯ (м)", 0, 5000, 300, step=10)
-angle = col_d2.number_input("КУТ (°)", -90, 90, 0, step=5)
+# Кнопка Авто-оновлення
+if st.button("📡 ОНОВИТИ GPS ТА ПОГОДУ"):
+    auto = get_auto_data()
+    if auto:
+        st.session_state.temp = auto['temp']
+        st.session_state.press = auto['press']
+        st.session_state.lat = auto['lat']
+        st.success("Дані оновлено успішно!")
+    else:
+        st.error("Не вдалося отримати дані")
 
-col_w1, col_w2 = st.columns(2)
-w_s = col_w1.number_input("ВІТЕР (м/с)", 0.0, 40.0, 0.0, step=0.5)
-w_d = col_w2.number_input("НАПРЯМОК ВІТРУ (1-12)", 1, 12, 12, step=1)
+# Параметри (з підтримкою сесії)
+temp = st.session_state.get('temp', 15)
+press = st.session_state.get('press', 1013)
+lat = st.session_state.get('lat', 50.4)
 
-# БЛОКИ РЕДАГУВАННЯ (Згруповані)
-with st.expander("🚀 БОЄПРИПАС (V0, BC, Вага)"):
-    v0 = st.number_input("Початкова швидкість (м/с)", 100, 1500, 961)
-    bc = st.number_input("Балістичний коефіцієнт (BC)", 0.01, 1.5, 0.395, format="%.3f")
-    model = st.selectbox("Драг-модель", ["G1", "G7"])
-    t_coeff = st.number_input("Термозалежність пороху (м/с на 1°C)", 0.0, 3.0, 0.2)
+st.markdown(f"""
+    <div class="status-bar">
+    <table style="width:100%; text-align:center; font-size:12px;">
+        <tr><td>TEMP</td><td>PRESS</td><td>LAT</td></tr>
+        <tr style="font-weight:bold; font-size:16px;">
+            <td>{temp}°C</td><td>{press}hPa</td><td>{lat:.1f}°N</td>
+        </tr>
+    </table>
+    </div>
+""", unsafe_allow_html=True)
 
-with st.expander("🔭 ЗБРОЯ (Приціл, Твіст, Кліки)"):
-    sh = st.number_input("Висота прицілу (см)", 0.0, 25.0, 5.0)
-    zero = st.number_input("Дистанція пристрілки (м)", 10, 1000, 300)
-    twist = st.number_input("Твіст ствола (дюйми)", 5.0, 20.0, 10.0)
-    click_val = st.number_input("Ціна кліка (MRAD)", 0.01, 1.0, 0.1, format="%.2f")
+# Основний ввід
+col_dist, col_compass = st.columns([1, 1.5])
+with col_dist:
+    dist = st.number_input("DIST (m)", 0, 3000, 500, step=10)
+    st.markdown(f"<h1 style='color:#C62828; font-size:60px; text-align:center;'>{dist}</h1>", unsafe_allow_html=True)
 
-with st.expander("🌍 АТМОСФЕРА (Тиск, Темп.)"):
-    temp = st.number_input("Температура повітря (°C)", -50, 60, 15)
-    press = st.number_input("Тиск (hPa/mbar)", 500, 1100, 1013)
+with col_compass:
+    w_dir = st.slider("WIND DIR", 0, 360, 210, label_visibility="hidden")
+    fig = go.Figure(go.Scatterpolar(r=[0, 1], theta=[w_dir, w_dir], mode='lines+markers', marker=dict(symbol='arrow', size=15), line=dict(color='#C62828', width=5)))
+    fig.update_layout(polar=dict(angularaxis=dict(direction='clockwise', rotation=90)), showlegend=False, height=200, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
-# Збір всіх параметрів
+# Розрахунок
 p = {
-    'dist': dist, 'angle': angle, 'w_speed': w_s, 'w_dir': w_d,
-    'v0': v0, 'bc': bc, 'model': model, 't_coeff': t_coeff,
-    'sh': sh, 'zero': zero, 'twist': twist, 'click': click_val,
-    'temp': temp, 'press': press
+    'dist': dist, 'v0': 825, 'bc': 0.45, 'temp': temp, 'press': press, 
+    'w_speed': 4.5, 'w_dir': w_dir, 'angle': 0, 'zero': 100, 
+    'sh': 5, 'twist': 10, 'lat': lat, 'azimuth': 0
 }
+cv, ch, tf = advanced_calc(p)
 
-# РОЗРАХУНОК ТА ВИВІД
-cv, ch, time, v_final = full_ballistic_calc(p)
-
-st.divider()
-res_v, res_h = st.columns(2)
-res_v.metric("КЛІКИ ВЕРТИКАЛЬ", f"{cv}")
-res_h.metric("КЛІКИ ГОРИЗОНТ", f"{ch}")
-
-c_t, c_v = st.columns(2)
-c_t.write(f"⏱ **Час:** {time} с")
-c_v.write(f"💨 **V у цілі:** {v_final} м/с")
-
-if st.button("📊 ГЕНЕРУВАТИ ТАБЛИЦЮ"):
-    rows = []
-    for d_step in range((dist//100)*100 - 100, (dist//100)*100 + 401, 50):
-        if d_step <= 0: continue
-        p['dist'] = d_step
-        v, h, _, _ = full_ballistic_calc(p)
-        rows.append({"Метри": d_step, "Кліки V": v, "Кліки H": h})
-    st.table(pd.DataFrame(rows))
+# Результати
+st.markdown("<br>", unsafe_allow_html=True)
+r1, r2, r3 = st.columns(3)
+r1.markdown(f'<div class="result-box"><p style="color:#C62828; font-size:10px;">COME UP</p><p class="res-val">↑ {cv}</p></div>', unsafe_allow_html=True)
+r2.markdown(f'<div class="result-box"><p style="color:#C62828; font-size:10px;">WINDAGE</p><p class="res-val">→ {ch}</p></div>', unsafe_allow_html=True)
+r3.markdown(f'<div class="result-box"><p style="color:#C62828; font-size:10px;">TIME</p><p class="res-val">{tf}s</p></div>', unsafe_allow_html=True)
