@@ -8,7 +8,8 @@ st.set_page_config(page_title="Magelan 300WM 1:11", layout="centered")
 
 # --- ОНОВЛЕНІ ПРЕСЕТИ З ВАШИМ ТВІСТОМ ---
 PRESETS = {
-    "Мій .300 Win Mag (195gr)": {
+    ".223 Rem (69gr)": {"cal": 0.224, "weight": 69.0, "len": 0.98, "bc": 0.155, "v0": 850},
+    ".300 Win Mag (195gr)": {
         "cal": 0.308, 
         "weight": 195.0, 
         "len": 1.450, 
@@ -19,6 +20,7 @@ PRESETS = {
     },
     ".308 Win (175gr SMK)": {"cal": 0.308, "weight": 175.0, "len": 1.24, "bc_g7": 0.243, "bc_g1": 0.495, "v0": 790, "twist": 11.0},
     "6.5 Creedmoor (140gr ELD)": {"cal": 0.264, "weight": 140.0, "len": 1.38, "bc_g7": 0.315, "bc_g1": 0.620, "v0": 820, "twist": 8.0}
+    ".338 LM (250gr)": {"cal": 0.338, "weight": 250.0, "len": 1.62, "bc": 0.335, "v0": 900}
 }
 
 # --- ЛОГІКА ТЕМИ ---
