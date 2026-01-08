@@ -67,7 +67,7 @@ def get_ballistics(p, d):
     m_lb, m_cal = p['weight'] / 7000, p['cal']
     sg = (30 * m_lb) / ( (p['tw_v']/m_cal)**2 * m_cal**3 * (p['len']/m_cal) * (1 + (p['len']/m_cal)**2) ) * (p['v0']/2800)**(1/3)
 
-    return {"v": round(v_mil, 2), "h": round(abs(h_mil), 2), "side": "Л" if h_mil < 0 else "П", "v_at": int(v_at), "mach": round(mach, 2), "sg": round(sg, 2), "tof": round(tof, 3), "cor_cm": cor_h_cm}
+    return {"v": round(v_mil, 2), "h": round(abs(h_mil), 2), "side": "Ліворуч" if h_mil < 0 else "Праворуч", "v_at": int(v_at), "mach": round(mach, 2), "sg": round(sg, 2), "tof": round(tof, 3), "cor_cm": cor_h_cm}
 
 # --- ІНТЕРФЕЙС ---
 st.button("🌙 НІЧНИЙ РЕЖИМ", on_click=lambda: st.session_state.update({'night': not st.session_state.night}))
