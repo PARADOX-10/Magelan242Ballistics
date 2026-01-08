@@ -111,7 +111,6 @@ st.markdown("<h1 style='text-align: center;'>APEX PREDATOR v110</h1>", unsafe_al
 
 # Оперативні налаштування
 dist_op = st.slider("🎯 ДИСТАНЦІЯ (м)", 50, 1800, 800, step=10)
-wind_op = st.slider("💨 ВІТЕР (м/с)", 0, 25, 3)
 
 with st.sidebar:
     st.header("🔫 ЗБРОЯ ТА ПАТРОН")
@@ -131,6 +130,7 @@ with st.sidebar:
 with st.expander("☁️ МЕТЕО ТА КУТ"):
     temp_in = st.slider("Температура (°C)", -30, 50, 15)
     press_in = st.number_input("Тиск (гПа)", 900, 1100, 1013)
+    wind_op = st.slider("💨 ВІТЕР (м/с)", 0, 25, 3)
     wh_in = st.slider("Напрямок вітру (год)", 0, 12, 3)
     angle_in = st.slider("Кут нахилу (°)", -45, 45, 0)
 
