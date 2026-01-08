@@ -8,7 +8,6 @@ st.set_page_config(page_title="Magelan 300WM 1:11", layout="centered")
 
 # --- ОНОВЛЕНІ ПРЕСЕТИ З ВАШИМ ТВІСТОМ ---
 PRESETS = {
-    ".223 Rem (69gr)": {"cal": 0.224, "weight": 69.0, "len": 0.98, "bc": 0.155, "v0": 850},
     ".300 Win Mag (195gr)": {
         "cal": 0.308, 
         "weight": 195.0, 
