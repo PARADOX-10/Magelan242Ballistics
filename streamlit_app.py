@@ -8,7 +8,7 @@ import math
 # Конфігурація
 st.set_page_config(page_title="Magelan242 Ballistics", layout="wide")
 
-# Стилізація для друку та інтерфейсу
+# Стилізація
 st.markdown("""
     <style>
     @media print {
@@ -20,7 +20,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def run_simulation(p):
-    v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
+    # Використовуємо вже скориговану швидкість, отриману з енергії або прямого вводу
+    v0_corr = p['v0_actual'] + (p['temp'] - 15) * p['t_coeff']
+    
     tk = p['temp'] + 273.15
     rho = (p['pressure'] * 100) / (287.05 * tk)
     k_drag = 0.5 * rho * (1/p['bc']) * 0.00052
@@ -37,14 +39,14 @@ def run_simulation(p):
         t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
         drop_zero = 0.5 * g * (t_zero**2)
         y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
-        
+       
         wind_rad = math.radians(p['w_dir'] * 30)
         wind_drift = (p['w_speed'] * math.sin(wind_rad)) * (t - (d/v0_corr)) if d > 0 else 0
         derivation = 0.05 * (p['twist'] / 10) * (d / 100)**2 if d > 0 else 0
-        
+       
         v_curr = v0_corr * math.exp(-k_drag * d)
         energy = (weight_kg * v_curr**2) / 2
-        
+       
         mrad_v = (y_m * 100) / (d / 10) if d > 0 else 0
         mrad_h = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
 
@@ -64,9 +66,21 @@ st.sidebar.title("🛡️ Magelan242 Ballistics")
 tab_1, tab_2, tab_3 = st.sidebar.tabs(["🚀 Набій", "🔭 Зброя", "🌍 Умови"])
 
 with tab_1:
-    v0 = st.number_input("Початкова швидкість (м/с)", 200.0, 1500.0, 961.0)
     weight = st.number_input("Вага кулі (гран)", 1.0, 1000.0, 200.0)
-    input_energy = st.number_input("Енергія набою (Дж)", value=int((weight * 0.0000647989 * v0**2) / 2))
+    w_kg = weight * 0.0000647989
+    
+    # Вибір способу введення потужності
+    input_mode = st.radio("Вводити через:", ["Швидкість", "Енергію"])
+    
+    if input_mode == "Швидкість":
+        v0 = st.number_input("Початкова швидкість (м/с)", 200.0, 1500.0, 961.0)
+        e0 = int((w_kg * v0**2) / 2)
+        st.info(f"Розрахункова енергія: {e0} Дж")
+    else:
+        e0 = st.number_input("Енергія набою (Дж)", 100, 20000, 6000)
+        v0 = math.sqrt((2 * e0) / w_kg)
+        st.info(f"Розрахункова швидкість: {v0:.1f} м/с")
+        
     bc = st.number_input("Балістичний коефіцієнт BC", 0.01, 2.0, 0.395, format="%.3f")
     model = st.selectbox("Модель опору", ["G1", "G7"])
     t_coeff = st.number_input("Термозалежність (м/с на 1°C)", 0.0, 2.0, 0.2)
@@ -85,7 +99,7 @@ with tab_3:
     angle = st.slider("Кут пострілу (°)", -80, 80, 0)
 
 # Розрахунок
-params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp,
+params = {'v0_actual': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp,
           'pressure': press, 'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle,
           'twist': twist, 'zero_dist': zero_dist, 'max_dist': max_d, 'sh': sh, 't_coeff': t_coeff}
 
@@ -94,37 +108,24 @@ try:
     res = df.iloc[-1]
 
     st.title("🏹 Magelan242 Ballistics")
-    
-    # Метрики
+   
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Початкова швидкість", f"{v0_final:.1f} м/с")
-    c2.metric("Кліки (Вертикаль)", int(res['Кліки (V)']))
-    c3.metric("Кліки (Горизонталь)", int(res['Кліки (H)']))
-    c4.metric("Швидкість у цілі", f"{res['Швидкість']} м/с")
+    c1.metric("V0 (Темп. кор.)", f"{v0_final:.1f} м/с")
+    c2.metric("Кліки (V)", int(res['Кліки (V)']))
+    c3.metric("Кліки (H)", int(res['Кліки (H)']))
+    c4.metric("Енергія у цілі", f"{res['Енергія']} Дж")
 
-    # Вкладки: Графіки / Картка для друку
-    tab_graphs, tab_print = st.tabs(["📊 Аналітичні Графіки", "🖨️ Картка для друку (Print Card)"])
+    tab_graphs, tab_print = st.tabs(["📊 Графіки", "🖨️ Друк"])
 
     with tab_graphs:
-        fig = make_subplots(rows=1, cols=2, subplot_titles=("Траєкторія", "Енергія"))
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Траєкторія (см)", "Енергія (Дж)"))
         fig.add_trace(go.Scatter(x=df['Дистанція'], y=df['Падіння (см)'], fill='tozeroy', name="см", line=dict(color='lime')), 1, 1)
         fig.add_trace(go.Scatter(x=df['Дистанція'], y=df['Енергія'], fill='tozeroy', name="Дж", line=dict(color='red')), 1, 2)
         fig.update_layout(template="plotly_dark", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab_print:
-        st.subheader("📋 Компактна картка вогню")
-        col_p1, col_p2 = st.columns([1, 2])
-        with col_p1:
-            st.write(f"**Початкова швидкість:** {v0_final:.1f} м/с | **Балістичний коефіцієнт BC:** {bc} ({model})")
-            st.write(f"**Температура:** {temp}°C | **Атмосферний тиск:** {press} hPa | **Швидкість вітру:** {w_speed} м/с на {w_dir} год")
-        
-        print_step = st.selectbox("Крок для друку:", [25, 50, 100, 200], index=2)
-        print_df = df[df['Дистанція'] % print_step == 0][['Дистанція', 'Кліки (V)', 'Кліки (H)', 'Швидкість', 'Енергія']]
-        
-        # Стилізація таблиці для друку
-        st.table(print_df.style.format(precision=1))
-        st.caption("Примітка: 1 клік = 0.1 MRAD (1 см / 100 м)")
+        st.table(df[df['Дистанція'] % 100 == 0][['Дистанція', 'Кліки (V)', 'Кліки (H)', 'Швидкість', 'Енергія']].style.format(precision=1))
 
 except Exception as e:
     st.error(f"Помилка: {e}")
