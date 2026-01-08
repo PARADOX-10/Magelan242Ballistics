@@ -60,7 +60,7 @@ def run_simulation(p):
     return pd.DataFrame(results), v0_corr
 
 # --- БОКОВЕ МЕНЮ ---
-st.sidebar.title("🛡️ Magelan242 Elite")
+st.sidebar.title("🛡️ Magelan242 Ballistics")
 tab_1, tab_2, tab_3 = st.sidebar.tabs(["🚀 Набій", "🔭 Зброя", "🌍 Умови"])
 
 with tab_1:
