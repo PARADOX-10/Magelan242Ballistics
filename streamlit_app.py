@@ -4,10 +4,10 @@ import numpy as np
 import math
 import plotly.graph_objects as go
 
-# --- КОНФІГУРАЦІЯ ---
-st.set_page_config(page_title="Magelan Apex v130", layout="centered")
+# --- КОНФІГУРАЦІЯ СТОРІНКИ ---
+st.set_page_config(page_title="Magelan Apex v125", layout="centered")
 
-# --- СТИЛІЗАЦІЯ ---
+# --- СТИЛІЗАЦІЯ (DARK MODE) ---
 st.markdown("""
     <style>
     [data-testid="stAppViewContainer"] { background: #080a0c; }
@@ -19,6 +19,7 @@ st.markdown("""
     .label { color: #8e949e; font-size: 13px; text-transform: uppercase; font-weight: bold; }
     .value { color: #ffffff; font-size: 34px; font-weight: 900; line-height: 1.1; }
     .sub-value { color: #ff4b4b; font-size: 16px; font-weight: bold; }
+    .stSlider, .stNumberInput { margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -29,58 +30,70 @@ class ApexEngine:
         self.g = 9.80665
         self.m_kg = p['weight'] * 0.0000647989 
         
-    def calculate(self, custom_dist=None, custom_ws=None, custom_temp=None):
-        target_dist = custom_dist if custom_dist is not None else self.p['dist']
-        wind_speed = custom_ws if custom_ws is not None else self.p['ws']
-        temp = custom_temp if custom_temp is not None else self.p['temp']
+        # Термозалежність швидкості
+        t_ref = 15.0
+        self.v0 = p['v0'] * (1 + (p['temp'] - t_ref) * (p['p_sens'] / 100))
         
-        # Термозалежність V0
-        v0_eff = self.p['v0'] * (1 + (temp - 15.0) * (self.p['p_sens'] / 100))
-        # Щільність повітря
-        rho = (self.p['press'] * 100) / (287.05 * (temp + 273.15))
-        v_sound = 331.3 * math.sqrt(1 + temp / 273.15)
-        
+        # Атмосфера
+        self.rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+        self.v_sound = 331.3 * math.sqrt(1 + p['temp'] / 273.15)
+
+    def calculate(self):
         dt = 0.005 
         pos = np.array([0.0, self.p['sh']/100, 0.0])
-        vel = np.array([v0_eff * math.cos(math.radians(self.p['angle'])), 
-                        v0_eff * math.sin(math.radians(self.p['angle'])), 0.0])
+        vel = np.array([self.v0 * math.cos(math.radians(self.p['angle'])), 
+                        self.v0 * math.sin(math.radians(self.p['angle'])), 0.0])
         t = 0.0
-        v_wind = np.array([wind_speed * math.cos(math.radians(self.p['wh']*30)), 
-                           0.0, wind_speed * math.sin(math.radians(self.p['wh']*30))])
         
+        v_wind = np.array([
+            self.p['ws'] * math.cos(math.radians(self.p['wh']*30)),
+            0.0,
+            self.p['ws'] * math.sin(math.radians(self.p['wh']*30))
+        ])
+        
+        # Коефіцієнт опору
         model_factor = 1.0 if self.p['drag_model'] == "G7" else 0.518
-        drag_const = 0.5 * rho * (1 / (self.p['bc'] * model_factor)) * 0.00052
+        drag_const = 0.5 * self.rho * (1 / (self.p['bc'] * model_factor)) * 0.00052
         
         path = []
-        while pos[0] < target_dist:
+
+        while pos[0] < self.p['dist']:
             v_rel = vel - v_wind
-            a_drag = -drag_const * np.linalg.norm(v_rel) * v_rel
-            vel += dt * (a_drag + np.array([0, -self.g, 0]))
+            v_mag = np.linalg.norm(v_rel)
+            a_drag = -drag_const * v_mag * v_rel
+            a_grav = np.array([0, -self.g, 0])
+            
+            vel += dt * (a_drag + a_grav)
             pos += dt * vel
             t += dt
             path.append(pos.copy())
 
-        # Деривація
+        # Деривація (Spin Drift)
         sg = (30 * (self.p['weight']/7000)) / ((self.p['twist']/0.308)**2 * 0.308**3 * (1.45/0.308) * (1+(1.45/0.308)**2))
         sd_m = 1.25 * (sg + 1.2) * (t**1.83) * 0.01 
         
+        # Горизонтальний результат
         total_z_m = pos[2] + sd_m
-        v_mil = abs(pos[1] * 100) / (target_dist / 10)
-        h_mil = abs(total_z_m * 100) / (target_dist / 10)
+        
+        v_mil = abs(pos[1] * 100) / (self.p['dist'] / 10)
+        h_mil = abs(total_z_m * 100) / (self.p['dist'] / 10)
         side = "ЛІВО" if total_z_m < 0 else "ПРАВО"
         
         v_final = np.linalg.norm(vel)
+        energy_final = 0.5 * self.m_kg * (v_final**2)
+        
         return {
-            'v_mil': v_mil, 'h_mil': h_mil, 'side': side, 'v_at': int(v_final),
-            'e_final': int(0.5 * self.m_kg * (v_final**2)), 'path': np.array(path),
-            'v0_eff': round(v0_eff, 1), 'tof': round(t, 3), 'drop_cm': pos[1]*100, 'drift_cm': total_z_m*100
+            'v_mil': round(v_mil, 2), 'h_mil': round(h_mil, 2), 'side': side,
+            'v_at': int(v_final), 'e_final': int(energy_final),
+            'path': np.array(path), 'v0_eff': round(self.v0, 1), 'tof': round(t, 3)
         }
 
 # --- ІНТЕРФЕЙС ---
-st.title("🏹 Magelan Apex v130")
+st.title("🏹 Magelan Apex v125")
 
+# Оперативна зона
 dist_op = st.slider("🎯 Дистанція (м)", 100, 1500, 800, step=10)
-ws_op = st.slider("💨 Вітер (м/с)", 0.0, 25.0, 3.0, step=0.5)
+ws_op = st.slider("💨 Вітер (м/с)", 0, 25, 3)
 
 with st.sidebar:
     st.header("🔫 Набій та Зброя")
@@ -99,6 +112,7 @@ with st.expander("☁️ Метео та Кут"):
     wh_in = st.slider("Вітер (год)", 0, 12, 3)
     angle_in = st.slider("Кут цілі (°)", -45, 45, 0)
 
+# ОБЧИСЛЕННЯ
 engine = ApexEngine({
     'v0': v0_in, 'bc': bc_in, 'weight': weight_in, 'twist': twist_in, 'sh': sh_in,
     'p_sens': p_sens_in, 'drag_model': drag_model, 'dist': dist_op,
@@ -106,30 +120,33 @@ engine = ApexEngine({
 })
 res = engine.calculate()
 
-# --- HUD ---
+# --- HUD (MOBILE READY) ---
 c1, c2 = st.columns(2)
 with c1:
-    st.markdown(f'<div class="main-card"><div class="label">ВГОРУ</div><div class="value">{round(res["v_mil"],2)} MIL</div><div class="sub-value">{int(round(res["v_mil"]/click_in))} КЛІКІВ</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-card"><div class="label">ВГОРУ</div><div class="value">{res["v_mil"]} MIL</div><div class="sub-value">{int(round(res["v_mil"]/click_in))} КЛІКІВ</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="main-card"><div class="label">{res["side"]}</div><div class="value">{round(res["h_mil"],2)} MIL</div><div class="sub-value">{int(round(res["h_mil"]/click_in))} КЛІКІВ</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-card"><div class="label">{res["side"]}</div><div class="value">{res["h_mil"]} MIL</div><div class="sub-value">{int(round(res["h_mil"]/click_in))} КЛІКІВ</div></div>', unsafe_allow_html=True)
 
-# --- ТАБЛИЦЯ ЧУВСТВИТЕЛЬНОСТІ ---
-st.subheader("📋 Таблиця чутливості (Похибка оцінки)")
-res_w_plus = engine.calculate(custom_ws = ws_op + 1.0)
-res_t_minus = engine.calculate(custom_temp = temp_in - 5.0)
-
-sens_data = {
-    "Параметр (Похибка)": ["Вітер +1 м/с", "Температура -5°C"],
-    "Смещение (см)": [round(abs(res_w_plus['drift_cm'] - res['drift_cm']), 1), round(abs(res_t_minus['drop_cm'] - res['drop_cm']), 1)],
-    "Смещение (MIL)": [round(abs(res_w_plus['h_mil'] - res['h_mil']), 2), round(abs(res_t_minus['v_mil'] - res['v_mil']), 2)]
-}
-st.table(pd.DataFrame(sens_data))
+e1, e2 = st.columns(2)
+with e1:
+    st.markdown(f'<div class="main-card" style="border-left-color: #ff9f1c;"><div class="label">Енергія цілі</div><div class="value">{res["e_final"]} J</div></div>', unsafe_allow_html=True)
+with e2:
+    st.markdown(f'<div class="main-card" style="border-left-color: #4b7bff;"><div class="label">Швидкість цілі</div><div class="value">{res["v_at"]} м/с</div></div>', unsafe_allow_html=True)
 
 # --- ГРАФІКИ ---
+st.subheader("📊 Траєкторія")
 path_data = res['path']
+
+# Вертикальний графік
 fig_v = go.Figure()
 fig_v.add_trace(go.Scatter(x=path_data[:, 0], y=path_data[:, 1], name="Падіння", line=dict(color='#ff4b4b', width=3)))
-fig_v.update_layout(height=300, template="plotly_dark", title="Вертикальна траєкторія (м)")
+fig_v.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10), template="plotly_dark", xaxis_title="Дистанція (м)", yaxis_title="Висота (м)")
 st.plotly_chart(fig_v, use_container_width=True)
 
-st.caption(f"Енергія: {res['e_final']} J | V0 (кор.): {res['v0_eff']} м/с | TOF: {res['tof']} с")
+# Горизонтальний графік
+fig_h = go.Figure()
+fig_h.add_trace(go.Scatter(x=path_data[:, 0], y=path_data[:, 2], name="Знесення", line=dict(color='#4b7bff', width=3)))
+fig_h.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10), template="plotly_dark", xaxis_title="Дистанція (м)", yaxis_title="Відхилення (м)")
+st.plotly_chart(fig_h, use_container_width=True)
+
+st.caption(f"V0 (кор.): {res['v0_eff']} м/с | Час польоту: {res['tof']} с")
