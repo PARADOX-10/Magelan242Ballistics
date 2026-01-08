@@ -1,154 +1,130 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
-import math
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import math
 
-# --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-st.set_page_config(page_title="Magelan Apex Pro v135", layout="wide")
+# Конфігурація
+st.set_page_config(page_title="Magelan242 Ballistics", layout="wide")
 
-class BallisticCalculator:
-    def __init__(self, p):
-        self.p = p
-        self.g = 9.80665
-        self.m_kg = p['weight'] * 0.0000647989 
-        self.v0 = p['v0'] * (1 + (p['temp'] - 15) * (p['p_sens'] / 100))
-        self.rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
-        self.omega_earth = 7.292115e-5 
+# Стилізація для друку та інтерфейсу
+st.markdown("""
+    <style>
+    @media print {
+        .stButton, .stTabs, .stSidebar, .stSelectbox, .stSlider { display: none !important; }
+        .main { background-color: white !important; color: black !important; }
+    }
+    .metric-card { background-color: #1a1c24; padding: 15px; border-radius: 10px; border-left: 5px solid #00FF00; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    def get_drag_g7(self, velocity):
-        """Динамічна модель опору G7"""
-        mach = velocity / (331.3 + 0.606 * self.p['temp'])
-        if mach > 1.0:
-            return 0.22 + (0.05 * (mach - 1))
-        return 0.22 + (0.15 * (1 - mach))
+def run_simulation(p):
+    v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
+    tk = p['temp'] + 273.15
+    rho = (p['pressure'] * 100) / (287.05 * tk)
+    k_drag = 0.5 * rho * (1/p['bc']) * 0.00052
+    if p['model'] == "G7": k_drag *= 0.91
 
-    def solve_trajectory(self, target_dist, extra_angle_moa=0):
-        dt = 0.002 # Крок інтеграції
-        pos = np.array([0.0, -self.p['sh']/100, 0.0]) # Ствол нижче прицілу
+    results = []
+    g = 9.80665
+    weight_kg = p['weight_gr'] * 0.0000647989
+    angle_rad = math.radians(p['angle'])
+
+    for d in range(0, p['max_dist'] + 1, 1):
+        t = d / (v0_corr * math.exp(-k_drag * d / 2)) if d > 0 else 0
+        drop = 0.5 * g * (t**2) * math.cos(angle_rad)
+        t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
+        drop_zero = 0.5 * g * (t_zero**2)
+        y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
         
-        # Кут вильоту
-        total_angle = math.radians(self.p['angle'] + (extra_angle_moa / 60))
-        vel = np.array([
-            self.v0 * math.cos(total_angle),
-            self.v0 * math.sin(total_angle),
-            0.0
-        ])
+        wind_rad = math.radians(p['w_dir'] * 30)
+        wind_drift = (p['w_speed'] * math.sin(wind_rad)) * (t - (d/v0_corr)) if d > 0 else 0
+        derivation = 0.05 * (p['twist'] / 10) * (d / 100)**2 if d > 0 else 0
         
-        # Вітер (боковий компонент)
-        wind_rad = math.radians(self.p['wh'] * 30)
-        v_wind = np.array([0.0, 0.0, self.p['ws'] * math.sin(wind_rad)])
+        v_curr = v0_corr * math.exp(-k_drag * d)
+        energy = (weight_kg * v_curr**2) / 2
         
-        t = 0.0
-        while pos[0] < target_dist and t < 5.0:
-            v_rel = vel - v_wind
-            v_mag = np.linalg.norm(v_rel)
-            
-            # Розрахунок прискорення опору
-            cd = self.get_drag_g7(v_mag)
-            accel_drag = -(0.5 * self.rho * v_mag * cd * 0.00052 / (self.p['bc'] * self.m_kg)) * v_rel
-            
-            # Ефект Коріоліса (горизонтальне відхилення)
-            lat_rad = math.radians(self.p['lat'])
-            coriolis_z = 2 * vel[0] * self.omega_earth * math.sin(lat_rad)
-            
-            accel_total = accel_drag + np.array([0, -self.g, coriolis_z])
-            
-            vel += accel_total * dt
-            pos += vel * dt
-            t += dt
-            
-        return pos, t, vel
+        mrad_v = (y_m * 100) / (d / 10) if d > 0 else 0
+        mrad_h = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
 
-    def get_results(self):
-        # 1. Знаходимо кут пристрілки (щоб на 100м було 0)
-        zero_angle = 0
-        for _ in range(3):
-            pos, _, _ = self.solve_trajectory(100, zero_angle)
-            drop_moa = (pos[1] / 100) * (180/math.pi) * 60
-            zero_angle -= drop_moa
+        if d % 5 == 0 or d == p['max_dist']:
+            results.append({
+                "Дистанція": d,
+                "Падіння (см)": round(y_m * 100, 1),
+                "Кліки (V)": round(abs(mrad_v / 0.1), 1),
+                "Кліки (H)": round(abs(mrad_h / 0.1), 1),
+                "Швидкість": round(v_curr, 1),
+                "Енергія": int(energy)
+            })
+    return pd.DataFrame(results), v0_corr
 
-        # 2. Рахуємо реальну дистанцію
-        final_pos, tof, final_vel = self.solve_trajectory(self.p['dist'], zero_angle)
-        
-        # 3. Spin Drift (Деривація)
-        sd_m = (1.25 * (1.5 + 1.2) * (tof**1.83)) * 0.0254
-        
-        # Конвертація в MIL (1 MIL = 10см на 100м)
-        v_mil = -(final_pos[1] * 100) / (self.p['dist'] / 100)
-        h_mil = ((final_pos[2] + sd_m) * 100) / (self.p['dist'] / 100)
-        
-        return {
-            "v_mil": round(v_mil, 2),
-            "h_mil": round(h_mil, 2),
-            "v_at": int(np.linalg.norm(final_vel)),
-            "tof": round(tof, 3)
-        }
+# --- БОКОВЕ МЕНЮ ---
+st.sidebar.title("🛡️ Magelan242 Ballistics")
+tab_1, tab_2, tab_3 = st.sidebar.tabs(["🚀 Набій", "🔭 Зброя", "🌍 Умови"])
 
-# --- ФУНКЦІЯ МАЛЮВАННЯ СІТКИ ---
-def draw_reticle(v_mil, h_mil):
-    fig = go.Figure()
+with tab_1:
+    v0 = st.number_input("Початкова швидкість (м/с)", 200.0, 1500.0, 961.0)
+    weight = st.number_input("Вага кулі (гран)", 1.0, 1000.0, 200.0)
+    input_energy = st.number_input("Енергія набою (Дж)", value=int((weight * 0.0000647989 * v0**2) / 2))
+    bc = st.number_input("Балістичний коефіцієнт BC", 0.01, 2.0, 0.395, format="%.3f")
+    model = st.selectbox("Модель опору", ["G1", "G7"])
+    t_coeff = st.number_input("Термозалежність (м/с на 1°C)", 0.0, 2.0, 0.2)
+
+with tab_2:
+    sh = st.number_input("Висота прицілу (см)", 0.0, 30.0, 5.0)
+    zero_dist = st.number_input("Пристрілка (м)", 1, 1000, 300)
+    twist = st.number_input("Твіст", 5.0, 20.0, 11.0)
+
+with tab_3:
+    temp = st.slider("Температура (°C)", -40, 60, 15)
+    press = st.number_input("Атмосферний тиск (hPa)", 500, 1100, 1013)
+    w_speed = st.slider("Швидкість вітру (м/с)", 0.0, 30.0, 0.0)
+    w_dir = st.slider("Напрям вітру (год)", 1, 12, 12)
+    max_d = st.number_input("Дистанція пострілу (м)", 10, 5000, 1200)
+    angle = st.slider("Кут пострілу (°)", -80, 80, 0)
+
+# Розрахунок
+params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp,
+          'pressure': press, 'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle,
+          'twist': twist, 'zero_dist': zero_dist, 'max_dist': max_d, 'sh': sh, 't_coeff': t_coeff}
+
+try:
+    df, v0_final = run_simulation(params)
+    res = df.iloc[-1]
+
+    st.title("🏹 Magelan242 Ballistics")
     
-    # Головні лінії перехрестя
-    fig.add_shape(type="line", x0=-10, y0=0, x1=10, y1=0, line=dict(color="rgba(255,255,255,0.8)", width=2))
-    fig.add_shape(type="line", x0=0, y0=-20, x1=0, y1=5, line=dict(color="rgba(255,255,255,0.8)", width=2))
-    
-    # MIL мітки
-    for i in range(1, 16):
-        # Вертикальні мітки (падіння)
-        fig.add_shape(type="line", x0=-0.2, y0=-i, x1=0.2, y1=-i, line=dict(color="white", width=1))
-        # Горизонтальні мітки (вітер)
-        if i <= 10:
-            fig.add_shape(type="line", x0=i, y0=-0.2, x1=i, y1=0.2, line=dict(color="white", width=1))
-            fig.add_shape(type="line", x0=-i, y0=-0.2, x1=-i, y1=0.2, line=dict(color="white", width=1))
+    # Метрики
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Початкова швидкість", f"{v0_final:.1f} м/с")
+    c2.metric("Кліки (Вертикаль)", int(res['Кліки (V)']))
+    c3.metric("Кліки (Горизонталь)", int(res['Кліки (H)']))
+    c4.metric("Швидкість у цілі", f"{res['Швидкість']} м/с")
 
-    # ТОЧКА ВЛУЧАННЯ
-    fig.add_trace(go.Scatter(
-        x=[h_mil], y=[-v_mil],
-        mode="markers",
-        marker=dict(color="#FF4B4B", size=15, symbol="cross", line=dict(width=2, color="white")),
-        name="Impact"
-    ))
+    # Вкладки: Графіки / Картка для друку
+    tab_graphs, tab_print = st.tabs(["📊 Аналітичні Графіки", "🖨️ Картка для друку (Print Card)"])
 
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis=dict(range=[-6, 6], showgrid=False, zeroline=False, title="MIL Horizontal"),
-        yaxis=dict(range=[-14, 2], showgrid=False, zeroline=False, title="MIL Vertical"),
-        margin=dict(l=20, r=20, t=20, b=20),
-        height=700,
-        paper_bgcolor="#0e1117",
-        plot_bgcolor="#0e1117"
-    )
-    return fig
+    with tab_graphs:
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Траєкторія", "Енергія"))
+        fig.add_trace(go.Scatter(x=df['Дистанція'], y=df['Падіння (см)'], fill='tozeroy', name="см", line=dict(color='lime')), 1, 1)
+        fig.add_trace(go.Scatter(x=df['Дистанція'], y=df['Енергія'], fill='tozeroy', name="Дж", line=dict(color='red')), 1, 2)
+        fig.update_layout(template="plotly_dark", height=400)
+        st.plotly_chart(fig, use_container_width=True)
 
-# --- UI STREAMLIT ---
-st.title("🏹 Magelan Apex Pro v135")
-st.markdown("---")
+    with tab_print:
+        st.subheader("📋 Компактна картка вогню")
+        col_p1, col_p2 = st.columns([1, 2])
+        with col_p1:
+            st.write(f"**Початкова швидкість:** {v0_final:.1f} м/с | **Балістичний коефіцієнт BC:** {bc} ({model})")
+            st.write(f"**Температура:** {temp}°C | **Атмосферний тиск:** {press} hPa | **Швидкість вітру:** {w_speed} м/с на {w_dir} год")
+        
+        print_step = st.selectbox("Крок для друку:", [25, 50, 100, 200], index=2)
+        print_df = df[df['Дистанція'] % print_step == 0][['Дистанція', 'Кліки (V)', 'Кліки (H)', 'Швидкість', 'Енергія']]
+        
+        # Стилізація таблиці для друку
+        st.table(print_df.style.format(precision=1))
+        st.caption("Примітка: 1 клік = 0.1 MRAD (1 см / 100 м)")
 
-c_input, c_vis = st.columns([1, 2])
-
-with c_input:
-    st.subheader("📝 Параметри")
-    dist = st.number_input("Дистанція цілі (м)", value=800, step=50)
-    v0 = st.number_input("Початкова швидкість (м/с)", value=820)
-    bc = st.number_input("БК G7", value=0.305, format="%.3f")
-    
-    with st.expander("🌍 Метео та Геометрія"):
-        ws = st.slider("Вітер (м/с)", 0.0, 20.0, 4.0)
-        wh = st.slider("Напрямок вітру (год)", 0, 12, 3)
-        temp = st.slider("Температура (°C)", -20, 45, 15)
-        sh = st.number_input("Висота прицілу (см)", value=4.5)
-        lat = st.slider("Широта (для Коріоліса)", 0, 90, 48)
-
-    calc = BallisticCalculator({
-        'v0': v0, 'bc': bc, 'weight': 175, 'sh': sh, 'dist': dist,
-        'ws': ws, 'wh': wh, 'temp': temp, 'press': 1013, 'p_sens': 1.0, 
-        'angle': 0, 'lat': lat
-    })
-    res = calc.get_results()
-
-    st.success(f"**Вертикаль:** {res['v_mil']} MIL")
-    st.success(f"**Горизонталь:** {res['h_mil']} MIL")
-    st.info(f"Швидкість у цілі: {res['v_at']} м/с | Час: {res['tof']} с")
-
-with c_vis:
-    st.plotly_chart(draw_reticle(res['v_mil'], res['h_mil']), use_container_width=True)
+except Exception as e:
+    st.error(f"Помилка: {e}")
