@@ -7,7 +7,7 @@ st.set_page_config(page_title="Magelan Ballistics UA", layout="centered")
 
 # --- ПРЕСЕТИ ---
 PRESETS = {
-    "Мій .300 Win Mag (195gr)": {
+    ".300 Win Mag (195gr)": {
         "cal": 0.308, "weight": 195.0, "len": 1.450, 
         "bc_g7": 0.292, "bc_g1": 0.584, "v0": 893.0, "twist": 11.0
     },
