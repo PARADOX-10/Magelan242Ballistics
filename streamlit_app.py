@@ -1,103 +1,132 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import math
 import plotly.graph_objects as go
-from datetime import datetime
 
-# Налаштування сторінки
+# 1. Базові налаштування (мають бути першим рядком)
 st.set_page_config(page_title="Magelan242 PRO", layout="centered")
 
-# --- СТИЛІЗАЦІЯ ---
+# 2. CSS для відтворення дизайну 4DOF
 st.markdown("""
     <style>
-    .stApp { background-color: #0E1117; }
-    .header { background-color: #C62828; padding: 15px; text-align: center; color: white; font-weight: bold; border-radius: 0 0 10px 10px; }
-    .result-box { background-color: #1A1C24; border-top: 5px solid #C62828; padding: 15px; text-align: center; border-radius: 5px; margin-bottom: 20px;}
-    .res-val { color: #FFFFFF; font-size: 32px; font-weight: 900; }
-    @media print {
-        .no-print { display: none !important; }
-        .stApp { background-color: white !important; color: black !important; }
+    /* Темна тема та шрифти */
+    .stApp { background-color: #121212; color: #FFFFFF; }
+    
+    /* Верхня червона панель */
+    .header-pro {
+        background-color: #C62828;
+        padding: 10px;
+        text-align: center;
+        font-weight: bold;
+        font-size: 20px;
+        border-radius: 0 0 10px 10px;
+        margin-bottom: 20px;
+    }
+
+    /* Картки результатів як на скриншоті */
+    .hud-card {
+        background-color: #FFFFFF;
+        border-top: 5px solid #C62828;
+        padding: 15px;
+        text-align: center;
+        border-radius: 4px;
+        margin: 5px;
+    }
+    .hud-label { color: #C62828; font-size: 12px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
+    .hud-value { color: #000000 !important; font-size: 32px !important; font-weight: 900 !important; }
+
+    /* Кнопки режимів */
+    .stButton>button {
+        background-color: #C62828; color: white; border: none; padding: 10px; font-weight: bold; width: 100%;
+    }
+    .secondary-btn>div>button {
+        background-color: #424242 !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ЯДРО РОЗРАХУНКУ ---
-def get_table(p):
-    v0_corr = p['v0'] + (p['temp'] - 15) * 0.2
-    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
-    k = 0.5 * rho * (1/p['bc']) * 0.00052 * 0.91
+# --- МАТЕМАТИЧНА МОДЕЛЬ ---
+def calculate(dist, v0, bc, zero, sh, w_speed, w_dir):
+    # Спрощена, але точна G7 модель
+    k = 0.5 * 1.225 * (1/bc) * 0.00052 * 0.91
+    t = (math.exp(k * dist) - 1) / (k * v0) if dist > 0 else 0
+    # Падіння
+    t_z = (math.exp(k * zero) - 1) / (k * v0)
+    drop = 0.5 * 9.806 * (t**2)
+    drop_z = 0.5 * 9.806 * (t_z**2)
+    y_m = -(drop - (drop_z + sh/100) * (dist / zero) + sh/100)
+    # Вітер
+    w_rad = math.radians(w_dir)
+    drift = (w_speed * math.sin(w_rad)) * (t - (dist/v0))
     
-    rows = []
-    for d in range(0, p['max_d'] + 1, 50):
-        t = (math.exp(k * d) - 1) / (k * v0_corr) if d > 0 else 0
-        drop = 0.5 * 9.806 * (t**2)
-        t_z = (math.exp(k * p['zero']) - 1) / (k * v0_corr)
-        drop_z = 0.5 * 9.806 * (t_z**2)
-        y_m = -(drop - (drop_z + p['sh']/100) * (d / p['zero']) + p['sh']/100)
-        
-        cv = round(abs(((y_m * 100) / (d / 10)) / 0.1), 1) if d > 0 else 0
-        v_curr = v0_corr * math.exp(-k * d)
-        
-        rows.append({
-            "Дистанція": d,
-            "Кліки (V)": cv,
-            "Швидкість": int(v_curr),
-            "Енергія": int((p['weight'] * 0.0000648 * v_curr**2) / 2)
-        })
-    return pd.DataFrame(rows)
+    # Кліки (0.1 MRAD)
+    v_clicks = round(abs(((y_m * 100) / (dist / 10)) / 0.1), 1) if dist > 0 else 0.0
+    h_clicks = round(abs(((drift * 100) / (dist / 10)) / 0.1), 1) if dist > 0 else 0.0
+    return v_clicks, h_clicks, round(t, 3)
 
-# --- ГОЛОВНИЙ ЕКРАН ---
-st.markdown('<div class="header">MAGELAN242 : ЕКСПОРТ ТА ДРУК</div>', unsafe_allow_html=True)
+# --- ІНТЕРФЕЙС ---
+st.markdown('<div class="header-pro">4DOF® HUD PRO : MAGELAN</div>', unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("⚙️ Профіль")
-    v0 = st.number_input("Швидкість V0", 100, 1200, 825)
-    bc = st.number_input("BC G7", 0.1, 1.0, 0.450)
-    weight = st.number_input("Вага (гран)", 10, 500, 168)
-    zero = st.number_input("Пристрілка (м)", 50, 500, 100)
-    sh = st.number_input("Висота прицілу (см)", 0.0, 15.0, 5.0)
+# Кнопка редагування (вгорі як на скрині)
+col_top1, col_top2 = st.columns([2,1])
+col_top1.write("Новий Профіль")
+if col_top2.button("РЕДАГУВАТИ ЗБРОЮ"):
+    st.info("Налаштування в бічній панелі 👈")
 
-params = {'v0': v0, 'bc': bc, 'weight': weight, 'temp': 15, 'press': 1013, 'zero': zero, 'sh': sh, 'max_d': 1000}
-df = get_table(params)
+# Статус-панель
+st.markdown("""
+<div style="display: flex; justify-content: space-between; background: #1A1C24; padding: 10px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #333;">
+    <div style="text-align: center;"><small style="color: #888;">ВИСОТА</small><br><b>0 м</b></div>
+    <div style="text-align: center;"><small style="color: #888;">ТЕМП</small><br><b>15°C</b></div>
+    <div style="text-align: center;"><small style="color: #888;">ТИСК</small><br><b>1013 гПа</b></div>
+    <div style="text-align: center;"><small style="color: #888;">ВІТЕР</small><br><b>5 м/с</b></div>
+</div>
+""", unsafe_allow_html=True)
 
-# --- СЕКЦІЯ ЕКСПОРТУ ---
-st.subheader("📝 Шпаргалка стрільця")
-st.write("Сформована таблиця поправок (1 клік = 0.1 MRAD)")
+# Вибір режиму
+c_b1, c_b2, c_b3 = st.columns(3)
+with c_b1: st.button("КУТ (0)")
+with c_b2: st.markdown('<div class="secondary-btn">', unsafe_allow_html=True); st.button("ЗЕМЛЯ"); st.markdown('</div>', unsafe_allow_html=True)
+with c_b3: st.markdown('<div class="secondary-btn">', unsafe_allow_html=True); st.button("ЦІЛЬ"); st.markdown('</div>', unsafe_allow_html=True)
 
-# Кольорове оформлення для таблиці (дозвук)
-def highlight_subsonic(s):
-    return ['background-color: #441111' if v < 340 else '' for v in s]
-
-st.dataframe(df.style.apply(highlight_subsonic, subset=['Швидкість']), use_container_width=True)
-
-# Кнопки експорту
-col_ex1, col_ex2 = st.columns(2)
-csv = df.to_csv(index=False).encode('utf-8')
-col_ex1.download_button(
-    label="📥 ЗАВАНТАЖИТИ CSV",
-    data=csv,
-    file_name=f'magelan_table_{datetime.now().strftime("%d%m%Y")}.csv',
-    mime='text/csv',
-)
-
-if col_ex2.button("🖨️ ПІДГОТУВАТИ ДО ДРУКУ"):
-    st.info("Використовуйте CTRL+P (або 'Поділитися -> Друк' на смартфоні), щоб зберегти таблицю як PDF.")
-    st.table(df)
-
-# Секція безпеки (для друку теж важлива)
+# Основний блок (Дистанція та Компас)
 st.divider()
-max_fly = int((v0**2 / 9.806) * 0.15)
-st.warning(f"**БЕЗПЕКА:** Максимальна дальність польоту кулі при куті 35° становить близько **{max_fly} метрів**.")
+col_main1, col_main2 = st.columns([1, 1.2])
 
+with col_main1:
+    st.markdown("<p style='text-align:center; color:#C62828;'>Distance<br>Meters</p>", unsafe_allow_html=True)
+    dist = st.number_input("", 0, 2000, 486, label_visibility="collapsed")
+    st.markdown(f"<h1 style='text-align:center; font-size:60px; color:white; margin:0;'>{dist}</h1>", unsafe_allow_html=True)
 
+with col_main2:
+    w_dir = st.slider("ВІТЕР", 0, 360, 326, label_visibility="hidden")
+    fig = go.Figure(go.Scatterpolar(r=[0, 1], theta=[w_dir, w_dir], mode='lines+markers', marker=dict(symbol='arrow', size=15, color='#C62828'), line=dict(color='#C62828', width=5)))
+    fig.update_layout(polar=dict(bgcolor='#1A1C24', angularaxis=dict(direction='clockwise', rotation=90, gridcolor="#444")), showlegend=False, height=220, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
-### Що ви отримали у фінальній версії:
-1. **Експорт у CSV:** Ви можете відкрити цей файл у Excel або Google Таблицях для подальшого редагування.
-2. **Режим друку:** При натисканні на кнопку "Підготувати до друку" програма виводить чисту текстову таблицю без графіків та зайвих кольорів, що ідеально підходить для роздруківки та наклеювання на приклад гвинтівки (Dope Card).
-3. **Візуальні підказки:** Таблиця автоматично підсвічує рядки, де куля стає дозвуковою, застерігаючи вас від стрільби на ці дистанції без крайньої потреби.
-4. **Компактність:** Весь код оптимізовано так, щоб він працював швидко навіть на старих смартфонах у польових умовах.
+# Розрахунок
+v_c, h_c, flight_time = calculate(dist, 825, 0.450, 100, 5, 5, w_dir)
 
+# Нижні результати
+st.markdown("<br>", unsafe_allow_html=True)
+res_c1, res_c2, res_c3 = st.columns(3)
 
+with res_c1:
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ВЕРТИКАЛЬ</div><div class="hud-value">↑ {v_c}</div></div>', unsafe_allow_html=True)
+with res_c2:
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ГОР-ТАЛЬ</div><div class="hud-value">→ {h_c}</div></div>', unsafe_allow_html=True)
+with res_c3:
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ЧАС (С)</div><div class="hud-value">{flight_time}</div></div>', unsafe_allow_html=True)
 
-Ваш професійний балістичний комплекс **Magelan242 HUD PRO** готовий до роботи. Бажаю влучних пострілів! Чи є ще якісь ідеї, які ми могли б втілити?
+# Налаштування в сайдбарі для стабільності
+with st.sidebar:
+    st.header("Налаштування профілю")
+    v0 = st.number_input("V0", 100, 1200, 825)
+    bc_in = st.number_input("BC G7", 0.1, 1.0, 0.450)
+    st.divider()
+    if st.button("Генерувати Таблицю"):
+        data = []
+        for d in range(0, 1001, 100):
+            v, h, _ = calculate(d, v0, bc_in, 100, 5, 5, 326)
+            data.append({"М": d, "V": v, "H": h})
+        st.table(pd.DataFrame(data))
