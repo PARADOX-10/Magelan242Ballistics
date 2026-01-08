@@ -3,130 +3,117 @@ import pandas as pd
 import math
 import plotly.graph_objects as go
 
-# 1. Базові налаштування (мають бути першим рядком)
-st.set_page_config(page_title="Magelan242 PRO", layout="centered")
+# --- НАЛАШТУВАННЯ СТОРІНКИ ---
+st.set_page_config(page_title="Magelan242 PRO", layout="wide")
 
-# 2. CSS для відтворення дизайну 4DOF
+# --- СТИЛІЗАЦІЯ (ТЕМНА ТЕМА) ---
 st.markdown("""
     <style>
-    /* Темна тема та шрифти */
-    .stApp { background-color: #121212; color: #FFFFFF; }
-    
-    /* Верхня червона панель */
-    .header-pro {
-        background-color: #C62828;
-        padding: 10px;
-        text-align: center;
-        font-weight: bold;
-        font-size: 20px;
-        border-radius: 0 0 10px 10px;
-        margin-bottom: 20px;
-    }
-
-    /* Картки результатів як на скриншоті */
-    .hud-card {
-        background-color: #FFFFFF;
-        border-top: 5px solid #C62828;
-        padding: 15px;
-        text-align: center;
-        border-radius: 4px;
-        margin: 5px;
-    }
-    .hud-label { color: #C62828; font-size: 12px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
-    .hud-value { color: #000000 !important; font-size: 32px !important; font-weight: 900 !important; }
-
-    /* Кнопки режимів */
-    .stButton>button {
-        background-color: #C62828; color: white; border: none; padding: 10px; font-weight: bold; width: 100%;
-    }
-    .secondary-btn>div>button {
-        background-color: #424242 !important;
-    }
+    .stApp { background-color: #0E1117; color: white; }
+    .header { background-color: #C62828; padding: 10px; text-align: center; color: white; font-weight: bold; border-radius: 5px; }
+    .hud-card { background-color: #FFFFFF; border-top: 5px solid #C62828; padding: 10px; text-align: center; border-radius: 4px; }
+    .hud-label { color: #C62828; font-size: 11px; font-weight: bold; }
+    .hud-value { color: #000000 !important; font-size: 28px !important; font-weight: 900 !important; }
+    .stNumberInput label { color: #E0E0E0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- МАТЕМАТИЧНА МОДЕЛЬ ---
-def calculate(dist, v0, bc, zero, sh, w_speed, w_dir):
-    # Спрощена, але точна G7 модель
-    k = 0.5 * 1.225 * (1/bc) * 0.00052 * 0.91
-    t = (math.exp(k * dist) - 1) / (k * v0) if dist > 0 else 0
-    # Падіння
-    t_z = (math.exp(k * zero) - 1) / (k * v0)
-    drop = 0.5 * 9.806 * (t**2)
-    drop_z = 0.5 * 9.806 * (t_z**2)
-    y_m = -(drop - (drop_z + sh/100) * (dist / zero) + sh/100)
-    # Вітер
-    w_rad = math.radians(w_dir)
-    drift = (w_speed * math.sin(w_rad)) * (t - (dist/v0))
+# --- МАТЕМАТИЧНИЙ МОДУЛЬ ---
+def ballistics_core(p):
+    # Корекція швидкості від температури (спрощено)
+    v0_eff = p['v0'] + (p['temp'] - 15) * 0.2
+    # Щільність повітря
+    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+    k = 0.5 * rho * (1/p['bc']) * 0.00052 * 0.91 # Коефіцієнт опору
     
-    # Кліки (0.1 MRAD)
-    v_clicks = round(abs(((y_m * 100) / (dist / 10)) / 0.1), 1) if dist > 0 else 0.0
-    h_clicks = round(abs(((drift * 100) / (dist / 10)) / 0.1), 1) if dist > 0 else 0.0
-    return v_clicks, h_clicks, round(t, 3)
+    t = (math.exp(k * p['dist']) - 1) / (k * v0_eff) if p['dist'] > 0 else 0
+    t_z = (math.exp(k * p['zero']) - 1) / (k * v0_eff)
+    
+    # Вертикальне падіння (з врахуванням кута)
+    drop = 0.5 * 9.806 * (t**2) * math.cos(math.radians(p['angle']))
+    drop_z = 0.5 * 9.806 * (t_z**2)
+    y_m = -(drop - (drop_z + p['sh']/100) * (p['dist'] / p['zero']) + p['sh']/100)
+    
+    # Ефект Коріоліса (Вертикаль)
+    cor_v = 2 * v0_eff * 7.2921e-5 * math.cos(math.radians(p['lat'])) * math.sin(math.radians(p['azimuth'])) * t
+    
+    # Вітер та Деривація
+    w_rad = math.radians(p['w_dir'])
+    drift = (p['w_speed'] * math.sin(w_rad)) * (t - (p['dist']/v0_eff))
+    derivation = 0.05 * (p['twist'] / 10) * (p['dist'] / 100)**2
+    
+    # Результати в MRAD
+    mrad_v = round(abs(((y_m + cor_v) * 100) / (p['dist'] / 10) / 0.1), 1) if p['dist'] > 0 else 0.0
+    mrad_h = round(abs(((drift + derivation) * 100) / (p['dist'] / 10) / 0.1), 1) if p['dist'] > 0 else 0.0
+    
+    return mrad_v, mrad_h, round(t, 3)
 
 # --- ІНТЕРФЕЙС ---
-st.markdown('<div class="header-pro">4DOF® HUD PRO : MAGELAN</div>', unsafe_allow_html=True)
+st.markdown('<div class="header">MAGELAN242 : ПОВНИЙ РУЧНИЙ КОНТРОЛЬ</div>', unsafe_allow_html=True)
 
-# Кнопка редагування (вгорі як на скрині)
-col_top1, col_top2 = st.columns([2,1])
-col_top1.write("Новий Профіль")
-if col_top2.button("РЕДАГУВАТИ ЗБРОЮ"):
-    st.info("Налаштування в бічній панелі 👈")
+# ГРУПА 1: Бокова панель (Налаштування гвинтівки та набою)
+with st.sidebar:
+    st.subheader("🎯 Гвинтівка та Набій")
+    v0 = st.number_input("Початкова швидкість (м/с)", 200, 1200, 825)
+    bc = st.number_input("Баліст. коефіцієнт (G7)", 0.100, 1.000, 0.450, format="%.3f")
+    weight = st.number_input("Вага кулі (гран)", 10.0, 500.0, 168.0)
+    twist = st.number_input("Крок нарізів (Twist)", 7.0, 16.0, 10.0)
+    sh = st.number_input("Висота прицілу (см)", 0.0, 15.0, 5.0)
+    zero = st.number_input("Дистанція пристрілки (м)", 50, 500, 100)
 
-# Статус-панель
-st.markdown("""
-<div style="display: flex; justify-content: space-between; background: #1A1C24; padding: 10px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #333;">
-    <div style="text-align: center;"><small style="color: #888;">ВИСОТА</small><br><b>0 м</b></div>
-    <div style="text-align: center;"><small style="color: #888;">ТЕМП</small><br><b>15°C</b></div>
-    <div style="text-align: center;"><small style="color: #888;">ТИСК</small><br><b>1013 гПа</b></div>
-    <div style="text-align: center;"><small style="color: #888;">ВІТЕР</small><br><b>5 м/с</b></div>
-</div>
-""", unsafe_allow_html=True)
+# ГРУПА 2: Верхня панель (Атмосфера та Гео)
+st.markdown("### ☁️ Атмосферні умови та Геопозиція")
+at1, at2, at3, at4 = st.columns(4)
+temp = at1.number_input("Темп. (°C)", -30, 50, 15)
+press = at2.number_input("Тиск (гПа)", 800, 1100, 1013)
+lat = at3.number_input("Широта (°)", -90.0, 90.0, 50.4)
+azimuth = at4.number_input("Азимут стрільби (°)", 0, 360, 0)
 
-# Вибір режиму
-c_b1, c_b2, c_b3 = st.columns(3)
-with c_b1: st.button("КУТ (0)")
-with c_b2: st.markdown('<div class="secondary-btn">', unsafe_allow_html=True); st.button("ЗЕМЛЯ"); st.markdown('</div>', unsafe_allow_html=True)
-with c_b3: st.markdown('<div class="secondary-btn">', unsafe_allow_html=True); st.button("ЦІЛЬ"); st.markdown('</div>', unsafe_allow_html=True)
-
-# Основний блок (Дистанція та Компас)
+# ГРУПА 3: Основні змінні (Дистанція, Вітер, Кут)
 st.divider()
-col_main1, col_main2 = st.columns([1, 1.2])
+main_col1, main_col2, main_col3 = st.columns([1, 1, 1])
 
-with col_main1:
-    st.markdown("<p style='text-align:center; color:#C62828;'>Distance<br>Meters</p>", unsafe_allow_html=True)
-    dist = st.number_input("", 0, 2000, 486, label_visibility="collapsed")
-    st.markdown(f"<h1 style='text-align:center; font-size:60px; color:white; margin:0;'>{dist}</h1>", unsafe_allow_html=True)
+with main_col1:
+    st.markdown("**ЦІЛЬ ТА КУТ**")
+    dist = st.number_input("Дистанція (м)", 0, 3000, 500)
+    angle = st.number_input("Кут місця цілі (°)", -60, 60, 0)
 
-with col_main2:
-    w_dir = st.slider("ВІТЕР", 0, 360, 326, label_visibility="hidden")
-    fig = go.Figure(go.Scatterpolar(r=[0, 1], theta=[w_dir, w_dir], mode='lines+markers', marker=dict(symbol='arrow', size=15, color='#C62828'), line=dict(color='#C62828', width=5)))
-    fig.update_layout(polar=dict(bgcolor='#1A1C24', angularaxis=dict(direction='clockwise', rotation=90, gridcolor="#444")), showlegend=False, height=220, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)')
+with main_col2:
+    st.markdown("**ВІТЕР**")
+    w_speed = st.number_input("Швидкість вітру (м/с)", 0.0, 30.0, 3.0)
+    w_dir = st.slider("Напрямок вітру (°)", 0, 360, 90)
+
+with main_col3:
+    # Компас для візуалізації
+    fig = go.Figure(go.Scatterpolar(r=[0, 1], theta=[w_dir, w_dir], mode='lines+markers', 
+                                    marker=dict(symbol='arrow', size=12, color='#C62828'), line=dict(color='#C62828', width=4)))
+    fig.update_layout(polar=dict(bgcolor='#1A1C24', angularaxis=dict(direction='clockwise', rotation=90)), 
+                      showlegend=False, height=180, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig, use_container_width=True)
 
-# Розрахунок
-v_c, h_c, flight_time = calculate(dist, 825, 0.450, 100, 5, 5, w_dir)
+# --- РОЗРАХУНОК ТА ВИВІД ---
+params = {
+    'dist': dist, 'v0': v0, 'bc': bc, 'temp': temp, 'press': press, 
+    'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle, 'zero': zero, 
+    'sh': sh, 'twist': twist, 'lat': lat, 'azimuth': azimuth, 'weight': weight
+}
+res_v, res_h, res_t = ballistics_core(params)
 
-# Нижні результати
 st.markdown("<br>", unsafe_allow_html=True)
 res_c1, res_c2, res_c3 = st.columns(3)
 
 with res_c1:
-    st.markdown(f'<div class="hud-card"><div class="hud-label">ВЕРТИКАЛЬ</div><div class="hud-value">↑ {v_c}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ВЕРТИКАЛЬ (КЛІКИ)</div><div class="hud-value">↑ {res_v}</div></div>', unsafe_allow_html=True)
 with res_c2:
-    st.markdown(f'<div class="hud-card"><div class="hud-label">ГОР-ТАЛЬ</div><div class="hud-value">→ {h_c}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ГОР-ТАЛЬ (КЛІКИ)</div><div class="hud-value">↔ {res_h}</div></div>', unsafe_allow_html=True)
 with res_c3:
-    st.markdown(f'<div class="hud-card"><div class="hud-label">ЧАС (С)</div><div class="hud-value">{flight_time}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hud-card"><div class="hud-label">ЧАС ПОЛЬОТУ (С)</div><div class="hud-value">{res_t}</div></div>', unsafe_allow_html=True)
 
-# Налаштування в сайдбарі для стабільності
-with st.sidebar:
-    st.header("Налаштування профілю")
-    v0 = st.number_input("V0", 100, 1200, 825)
-    bc_in = st.number_input("BC G7", 0.1, 1.0, 0.450)
-    st.divider()
-    if st.button("Генерувати Таблицю"):
-        data = []
-        for d in range(0, 1001, 100):
-            v, h, _ = calculate(d, v0, bc_in, 100, 5, 5, 326)
-            data.append({"М": d, "V": v, "H": h})
-        st.table(pd.DataFrame(data))
+# Кнопка для швидкої таблиці
+if st.button("📊 ПОБУДУВАТИ ТАБЛИЦЮ ПОПРАВОК"):
+    table_data = []
+    for d in range(0, dist + 201, 50):
+        params['dist'] = d
+        v, h, _ = ballistics_core(params)
+        table_data.append({"Дистанція": d, "Вертикаль": v, "Горизонталь": h})
+    st.table(pd.DataFrame(table_data))
