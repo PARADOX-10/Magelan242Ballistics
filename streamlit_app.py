@@ -3,113 +3,111 @@ import pandas as pd
 import numpy as np
 import math
 
-st.set_page_config(page_title="Magelan242 Moving Target", layout="wide")
+st.set_page_config(page_title="Magelan Tactical", layout="centered")
 
-# --- МАТЕМАТИЧНЕ ЯДРО ---
-def calculate_all_v51(p, dist, target_speed_kmh, target_angle_deg):
-    if dist <= 0: return {"v_mil": 0, "h_mil": 0, "lead_mil": 0, "v_at": p['v0'], "e": 0, "tof": 0}
-    
-    # Балістика
-    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
-    k = 0.5 * rho * (1/p['bc']) * 0.00052 * (0.91 if p['model'] == "G7" else 1.0)
-    tof = (math.exp(k * dist) - 1) / (k * p['v0'])
-    v_dist = p['v0'] * math.exp(-k * dist)
-    
-    # Вертикаль
-    t_z = (math.exp(k * p['zero']) - 1) / (k * p['v0'])
-    drop = 0.5 * 9.806 * (tof**2)
-    drop_z = 0.5 * 9.806 * (t_z**2)
-    y_m = -(drop - (drop_z + p['sh']/100) * (dist / p['zero']) + p['sh']/100)
-    v_mil = abs((y_m * 100) / (dist / 10) / 0.1)
-    
-    # Вітер (горизонт)
-    w_rad = math.radians(p['w_hour'] * 30)
-    wind_drift = p['w_speed'] * math.sin(w_rad) * (tof - (dist/p['v0']))
-    h_mil_wind = (wind_drift * 100) / (dist / 10) / 0.1
-    
-    # Упередження (Moving Target Lead)
-    # Швидкість цілі в м/с
-    v_target_ms = target_speed_kmh / 3.6
-    # Ефективна поперечна швидкість (V * sin(angle))
-    v_cross = v_target_ms * math.sin(math.radians(target_angle_deg))
-    # Зміщення цілі за час польоту кулі
-    lead_m = v_cross * tof
-    lead_mil = (lead_m * 100) / (dist / 10) / 0.1
-    
-    return {
-        "v_mil": round(v_mil, 1),
-        "h_mil_wind": round(h_mil_wind, 1),
-        "lead_total_mil": round(abs(h_mil_wind + lead_mil), 1),
-        "pure_lead": round(abs(lead_mil), 1),
-        "v_at": int(v_dist),
-        "e": int((p['weight'] * 0.0000648 * v_dist**2) / 2),
-        "tof": round(tof, 3)
-    }
+# --- ЛОГІКА ТЕМИ ---
+if 'night_mode' not in st.session_state:
+    st.session_state.night_mode = False
 
-# --- ІНТЕРФЕЙС ---
-st.markdown("""
+def toggle_mode():
+    st.session_state.night_mode = not st.session_state.night_mode
+
+# --- АДАПТИВНА СТИЛІЗАЦІЯ ---
+night = st.session_state.night_mode
+bg_color = "#0A0000" if night else "#0E1117"
+text_color = "#FF0000" if night else "#FFFFFF"
+accent_color = "#CC0000" if night else "#C62828"
+card_bg = "#1A0000" if night else "#1E1E1E"
+
+st.markdown(f"""
     <style>
-    .stApp { background-color: #0E1117; color: white; }
-    .header-box { background: linear-gradient(90deg, #1a1a1a 0%, #C62828 100%); padding: 15px; border-radius: 5px; margin-bottom: 20px; text-align: right; border-right: 5px solid white; }
-    .hud-card { background-color: #1E1E1E; border-top: 4px solid #C62828; padding: 15px; border-radius: 5px; text-align: center; margin-bottom: 10px; }
-    .hud-label { color: #888; font-size: 11px; text-transform: uppercase; font-weight: bold; }
-    .hud-value { color: #FFF; font-size: 26px; font-weight: 900; }
-    .lead-box { border: 2px solid #00FF00 !important; background-color: #0a1f0a !important; }
+    .stApp {{ background-color: {bg_color}; color: {text_color}; }}
+    
+    /* HUD */
+    .mobile-hud {{
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background-color: {bg_color};
+        padding: 10px 0;
+        border-bottom: 2px solid {accent_color};
+    }}
+    
+    .hud-card {{
+        background-color: {card_bg};
+        border-radius: 10px;
+        padding: 12px;
+        text-align: center;
+        border-left: 4px solid {accent_color};
+        margin-bottom: 5px;
+    }}
+    
+    .hud-label {{ color: {"#660000" if night else "#888"}; font-size: 12px; font-weight: bold; }}
+    .hud-value {{ color: {text_color}; font-size: 32px; font-weight: 900; }}
+    
+    /* Елементи керування */
+    .stButton>button {{
+        width: 100%;
+        background-color: {card_bg};
+        color: {text_color};
+        border: 1px solid {accent_color};
+    }}
+    
+    .section-head {{ 
+        background: {card_bg}; 
+        padding: 8px; 
+        color: {accent_color}; 
+        font-weight: bold; 
+        margin: 15px 0 10px 0;
+    }}
+    
+    /* Виправлення кольору тексту в інпутах для нічного режиму */
+    input {{ color: {text_color} !important; background-color: {bg_color} !important; }}
+    label {{ color: {text_color} !important; }}
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown('<div class="header-box"><h1>MAGELAN242 | DYNAMIC TARGET SYSTEM</h1></div>', unsafe_allow_html=True)
+# --- БАЛІСТИЧНЕ ЯДРО ---
+def calc_mobile(p, dist, t_speed, t_angle):
+    if dist <= 0: return {"v": 0, "h": 0, "tof": 0}
+    rho = (p['press'] * 100) / (287.05 * (p['temp'] + 273.15))
+    k = 0.5 * rho * (1/p['bc']) * 0.00052 * (0.91 if p['model'] == "G7" else 1.0)
+    tof = (math.exp(k * dist) - 1) / (k * p['v0'])
+    t_z = (math.exp(k * p['zero']) - 1) / (k * p['v0'])
+    y_m = -((0.5 * 9.806 * tof**2) - (0.5 * 9.806 * t_z**2 + p['sh']/100) * (dist / p['zero']) + p['sh']/100)
+    v_mil = abs((y_m * 100) / (dist / 10) / 0.1)
+    w_rad = math.radians(p['w_hour'] * 30)
+    wind_m = p['w_speed'] * math.sin(w_rad) * (tof - (dist/p['v0']))
+    lead_m = (t_speed / 3.6) * math.sin(math.radians(t_angle)) * tof
+    h_mil = abs(((wind_m + lead_m) * 100) / (dist / 10) / 0.1)
+    return {"v": round(v_mil, 1), "h": round(h_mil, 1), "tof": round(tof, 3)}
 
-c_ammo, c_target, c_res = st.columns([1, 1, 1.2])
+# --- ІНТЕРФЕЙС ---
 
-with c_ammo:
-    st.subheader("🛠 Налаштування")
-    v0 = st.number_input("V0 (м/с)", 820)
-    bc = st.number_input("БК (G7)", 0.450, format="%.3f")
-    weight = st.number_input("Вага (гран)", 175.0)
-    dist = st.slider("Дистанція (м)", 0, 1500, 500)
-    
-    with st.expander("Атмосфера та зброя"):
-        temp = st.number_input("Темп (°C)", 15)
-        press = st.number_input("Тиск (гПа)", 1013)
-        sh = st.number_input("Висота прицілу (см)", 5.0)
-        zero = st.number_input("Нуль (м)", 100)
+# Кнопка перемикання теми
+st.button("🌙 ПЕРЕКЛЮЧИТИ РЕЖИМ (ДЕНЬ/НІЧ)", on_click=toggle_mode)
 
-with c_target:
-    st.subheader("🏃 Рух цілі")
-    t_speed = st.number_input("Швидкість цілі (км/год)", 0.0, 40.0, 5.0)
-    t_angle = st.slider("Кут руху цілі (°)", 0, 90, 90, help="90° - рух перпендикулярно стрільцю, 0° - на або від стрільця")
-    
-    st.divider()
-    st.subheader("💨 Вітер")
-    w_s = st.slider("Швидкість вітру (м/с)", 0.0, 15.0, 3.0)
-    w_h = st.slider("Напрямок (год)", 1, 12, 3)
+st.markdown('<div class="mobile-hud">', unsafe_allow_html=True)
+m_dist = st.slider("🎯 ДИСТАНЦІЯ (м)", 0, 1500, 400, step=10)
+res_col1, res_col2 = st.columns(2)
+st.markdown('</div>', unsafe_allow_html=True)
 
-# ОБЧИСЛЕННЯ
-p = {'v0': v0, 'bc': bc, 'weight': weight, 'temp': temp, 'press': press, 'sh': sh, 'zero': zero, 'w_speed': w_s, 'w_hour': w_h, 'model': 'G7'}
-res = calculate_all_v51(p, dist, t_speed, t_angle)
+with st.expander("🛠 ПАРАМЕТРИ", expanded=False):
+    m_v0 = st.number_input("V0 (м/с)", value=830)
+    m_bc = st.number_input("БК (G7)", value=0.243, format="%.3f")
+    m_w_speed = st.slider("Вітер (м/с)", 0, 15, 3)
+    m_w_hour = st.slider("Година", 1, 12, 3)
+    m_t_speed = st.number_input("Ціль (км/год)", value=0.0)
 
-with c_res:
-    st.subheader("🎯 Результат")
-    st.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль (Падіння)</div><div class="hud-value">↑ {res["v_mil"]} MIL</div></div>', unsafe_allow_html=True)
-    
-    # Виділяємо упередження зеленим
-    st.markdown(f'<div class="hud-card lead-box"><div class="hud-label" style="color:#00FF00">Сумарне упередження (MIL)</div><div class="hud-value" style="color:#00FF00">↔ {res["lead_total_mil"]}</div></div>', unsafe_allow_html=True)
-    
-    st.caption(f"В т.ч. чисте упередження на рух: {res['pure_lead']} MIL")
-    
-    st.divider()
-    c_e, c_v = st.columns(2)
-    c_e.metric("Енергія", f"{res['e']} Дж")
-    c_v.metric("V у цілі", f"{res['v_at']} м/с")
-    st.write(f"⏱ Час польоту: **{res['tof']} с**")
+# Розрахунок
+params = {'v0': m_v0, 'bc': m_bc, 'temp': 15, 'press': 1013, 'sh': 5.0, 'zero': 100, 'w_speed': m_w_speed, 'w_hour': m_w_hour, 'model': 'G7'}
+res = calc_mobile(params, m_dist, m_t_speed, 90)
 
-st.divider()
-st.subheader("📊 Таблиця винесення (MIL)")
-# Швидка таблиця для різних швидкостей цілі
-speeds = [0, 5, 10, 15, 20]
-t_data = []
-for s in speeds:
-    r = calculate_all_v51(p, dist, s, t_angle)
-    t_data.append({"Швидкість цілі (км/год)": s, "Сумарне винесення (↔)": r['lead_total_mil'], "Час польоту (с)": r['tof']})
-st.table(pd.DataFrame(t_data))
+# HUD
+res_col1.markdown(f'<div class="hud-card"><div class="hud-label">ВЕРТИКАЛЬ</div><div class="hud-value">↑ {res["v"]}</div></div>', unsafe_allow_html=True)
+res_col2.markdown(f'<div class="hud-card"><div class="hud-label">ГОРИЗОНТ</div><div class="hud-value">↔ {res["h"]}</div></div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section-head">📋 ТАБЛИЦЯ ПОПРАВОК</div>', unsafe_allow_html=True)
+distances = [m_dist-100, m_dist, m_dist+100]
+table_rows = [{"М": d, "↑ MIL": calc_mobile(params, d, m_t_speed, 90)['v'], "↔ MIL": calc_mobile(params, d, m_t_speed, 90)['h']} for d in distances if d >= 0]
+st.table(pd.DataFrame(table_rows))
