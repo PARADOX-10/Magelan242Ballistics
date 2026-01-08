@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 import math
 
 # Конфігурація
-st.set_page_config(page_title="Magelan242 Elite", layout="wide")
+st.set_page_config(page_title="Magelan242 Ballistics", layout="wide")
 
 # Стилізація для друку та інтерфейсу
 st.markdown("""
