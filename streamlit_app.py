@@ -66,8 +66,9 @@ tab_1, tab_2, tab_3 = st.sidebar.tabs(["🚀 Набій", "🔭 Зброя", "�
 with tab_1:
     v0 = st.number_input("V0 (м/с)", 200.0, 1500.0, 961.0)
     weight = st.number_input("Вага (гран)", 1.0, 1000.0, 200.0)
+    input_energy = st.number_input("Енергія набою (Дж)", value=int((weight * 0.0000647989 * v0**2) / 2))
     bc = st.number_input("BC", 0.01, 2.0, 0.395, format="%.3f")
-    model = st.selectbox("Модель", ["G7", "G1"])
+    model = st.selectbox("Модель", ["G1", "G7"])
     t_coeff = st.number_input("Термоз. (м/с на 1°C)", 0.0, 2.0, 0.2)
 
 with tab_2:
