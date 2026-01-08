@@ -79,8 +79,8 @@ with tab_2:
 with tab_3:
     temp = st.slider("Темп. (°C)", -40, 60, 15)
     press = st.number_input("Тиск (hPa)", 500, 1100, 1013)
-    w_speed = st.slider("Вітер (м/с)", 0.0, 30.0, 5.0)
-    w_dir = st.slider("Напрямок (год)", 1, 12, 3)
+    w_speed = st.slider("Вітер (м/с)", 0.0, 30.0, 0.0)
+    w_dir = st.slider("Напрямок (год)", 1, 12, 12)
     max_d = st.number_input("Макс. дист. (м)", 10, 5000, 1200)
     angle = st.slider("Кут (°)", -80, 80, 0)
 
