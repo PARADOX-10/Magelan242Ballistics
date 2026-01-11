@@ -1,128 +1,151 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import math
 
-# Налаштування інтерфейсу
-st.set_page_config(page_title="Magelan242 Ballistics v15.0", layout="wide")
+# --- КОНФИГУРАЦИЯ ---
+st.set_page_config(page_title="Magelan242 Ballistics Pro", layout="wide")
 
-# --- МАТЕМАТИЧНЕ ЯДРО (Оптимізоване для 5000м) ---
-def run_simulation(p):
-    # Температурна корекція
+# Стиль кнопок и индикаторов
+st.markdown("""
+    <style>
+    .stButton>button { width: 100%; font-size: 24px; font-weight: bold; height: 3.5rem; border-radius: 10px; background-color: #262730; color: white; }
+    .stButton>button:hover { border-color: #00FF00; color: #00FF00; }
+    .metric-box { background-color: #1a1c24; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #333; }
+    .status-safe { color: #00FF00; font-weight: bold; }
+    .status-warn { color: #FFA500; font-weight: bold; }
+    .status-danger { color: #FF4B4B; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Инициализация состояния
+if 'dist_val' not in st.session_state: st.session_state.dist_val = 500
+if 'wind_val' not in st.session_state: st.session_state.wind_val = 0.0
+
+def get_drag_g7(mach):
+    if mach >= 1.2: return 0.202
+    if mach >= 0.95: return 0.202 + (1.2 - mach) * 0.45
+    return 0.35
+
+def run_pro_simulation(p):
     v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
-    
-    # Модель атмосфери
     tk = p['temp'] + 273.15
     rho = (p['pressure'] * 100) / (287.05 * tk)
-    
-    # Коефіцієнт опору
-    k_drag = 0.5 * rho * (1/p['bc']) * 0.00052
-    if p['model'] == "G7": k_drag *= 0.91
-
-    results = []
-    g = 9.80665
+    vsound = 331.3 * math.sqrt(tk / 273.15)
     weight_kg = p['weight_gr'] * 0.0000647989
-    angle_rad = math.radians(p['angle'])
+    g = 9.80665
+    dt = 0.001 
+    
+    results = []
+    curr_v = v0_corr
+    curr_x, curr_y, curr_t = 0.0, -p['sh'] / 100, 0.0
+    vx, vy = v0_corr, 0.0 # Упрощенный вектор для вычисления падения
 
-    # Крок розрахунку - 1 метр для максимальної точності
-    for d in range(0, p['max_dist'] + 1, 1):
-        t = d / (v0_corr * math.exp(-k_drag * d / 2)) if d > 0 else 0
+    while curr_x <= 1500: # Считаем до 1.5км для анализа зон
+        v_mag = math.sqrt(vx**2 + vy**2)
+        mach = v_mag / vsound
+        cd = get_drag_g7(mach)
         
-        # Падіння (вертикаль)
-        drop = 0.5 * g * (t**2) * math.cos(angle_rad)
-        t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
-        drop_zero = 0.5 * g * (t_zero**2)
-        y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
+        drag_accel = (0.5 * rho * v_mag * cd * 0.00051) / (p['bc'] * weight_kg)
         
-        # Вітер та Деривація
-        wind_rad = math.radians(p['w_dir'] * 30)
-        wind_drift = (p['w_speed'] * math.sin(wind_rad)) * (t - (d/v0_corr)) if d > 0 else 0
-        derivation = 0.05 * (p['twist'] / 10) * (d / 100)**2 if d > 0 else 0
+        ax = -drag_accel * vx
+        ay = -drag_accel * vy - g
         
-        v_curr = v0_corr * math.exp(-k_drag * d)
-        energy = (weight_kg * v_curr**2) / 2
+        vx += ax * dt
+        vy += ay * dt
+        curr_x += vx * dt
+        curr_y += vy * dt
+        curr_t += dt
         
-        # Додаємо дані лише для кроку, який вибере користувач у таблиці, 
-        # або для графіків (кожен 10-й метр для швидкості рендерингу)
-        if d % 10 == 0 or d == p['max_dist']:
+        if round(curr_x) % 10 == 0:
+            wind_drift = (p['w_speed'] * math.sin(math.radians(p['w_dir']*30))) * (curr_t - curr_x/v0_corr)
             results.append({
-                "Дистанція (м)": d,
-                "Падіння (см)": round(y_m * 100, 2),
-                "Знесення (см)": round((wind_drift + derivation) * 100, 2),
-                "MRAD Верт": round((y_m * 100) / (d / 10), 3) if d > 0 else 0,
-                "Швидкість (м/с)": round(v_curr, 1),
-                "Енергія (Дж)": int(energy)
+                "Distance": round(curr_x),
+                "Drop_m": curr_y,
+                "Windage_m": wind_drift,
+                "Velocity": v_mag,
+                "Energy": 0.5 * weight_kg * (v_mag**2),
+                "Mach": mach
             })
             
-    return pd.DataFrame(results), v0_corr
-
-# --- БОКОВЕ МЕНЮ ---
-st.sidebar.title("🛡️ Magelan242 Ballistics")
-st.sidebar.info("Режим тестування")
-
-tab_ammo, tab_rifle, tab_env = st.sidebar.tabs(["🚀 Набій", "🔭 Зброя", "🌍 Умови"])
-
-with tab_ammo:
-    v0 = st.number_input("Початкова швидкість (м/с)", 200.0, 1500.0, 961.0, step=1.0)
-    weight = st.number_input("Вага кулі (гран)", 1.0, 1000.0, 200.0)
-    input_energy = st.number_input("Енергія набою (Дж)", value=int((weight * 0.0000647989 * v0**2) / 2))
-    bc = st.number_input("Бал. коефіцієнт (BC)", 0.01, 2.0, 0.395, format="%.3f")
-    model = st.selectbox("Модель опору", ["G1", "G7"]) # G7 першим для далекої стрільби
-    t_coeff = st.number_input("Термозалежність (м/с на 1°C)", 0.0, 2.0, 0.2)
-
-with tab_rifle:
-    sh = st.number_input("Висота прицілу (см)", 0.0, 30.0, 5.0)
-    zero_dist = st.number_input("Пристрілка (м)", 1, 1000, 300)
-    twist = st.number_input("Твіст ствола (дюйми)", 5.0, 20.0, 11.0)
-    click_val = st.number_input("Ціна кліка (MRAD)", 0.001, 1.0, 0.1, format="%.3f")
-
-with tab_env:
-    temp = st.slider("Температура (°C)", -40, 60, 15)
-    press = st.number_input("Тиск (hPa)", 500, 1100, 1013)
-    w_speed = st.slider("Швидкість вітру (м/с)", 0.0, 30.0, 0.0)
-    w_dir = st.slider("Напрямок (год)", 1, 12, 12)
-    angle = st.slider("Кут стрільби (°)", -80, 80, 0)
-    # Збільшена дистанція до 5000м з кроком 1м
-    max_d = st.number_input("Макс. дистанція розрахунку (м)", 10, 5000, 1000, step=1)
-
-# Розрахунок
-params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 
-          'pressure': press, 'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle,
-          'twist': twist, 'zero_dist': zero_dist, 'max_dist': max_d, 'sh': sh, 't_coeff': t_coeff}
-
-try:
-    with st.spinner('Проводиться точний розрахунок...'):
-        df, v0_final = run_simulation(params)
-
-    # --- ІНТЕРФЕЙС ---
-    st.header(f"🎯 Magelan242: Аналіз на {max_d}м")
-
-    c1, c2, c3, c4 = st.columns(4)
-    res = df.iloc[-1]
-    c1.metric("V0 Коригована", f"{v0_final:.1f} м/с")
-    c2.metric("Поправка MRAD", abs(res['MRAD Верт']))
-    c3.metric("Кліки", f"{abs(res['MRAD Верт'] / click_val):.1f}")
-    c4.metric("Енергія в цілі", f"{res['Енергія (Дж)']} Дж")
-
-    # Графіки
-    fig = make_subplots(rows=2, cols=1, subplot_titles=("Траєкторія (см)", "Енергія (Дж)"))
-    fig.add_trace(go.Scatter(x=df['Дистанція (м)'], y=df['Падіння (см)'], name="Падіння", line=dict(color='lime')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['Дистанція (м)'], y=df['Енергія (Дж)'], name="Енергія", fill='tozeroy', line=dict(color='red')), row=2, col=1)
-
-    fig.update_layout(height=700, template="plotly_dark", showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Таблиця з можливістю вибору кроку
-    st.subheader("📋 Таблиця поправок")
-    step = st.selectbox("Крок таблиці (метрів):", [1, 5, 10, 25, 50, 100, 250, 500], index=5)
+    df = pd.DataFrame(results).drop_duplicates('Distance')
     
-    # Фільтруємо таблицю згідно з обраним кроком
-    display_df = df[df['Дистанція (м)'] % step == 0].copy()
-    st.dataframe(display_df, use_container_width=True)
+    # Расчет Zero
+    try:
+        zero_drop = df.iloc[(df['Distance']-p['zero_dist']).abs().argsort()[:1]]['Drop_m'].values[0]
+        df['Drop_cm'] = (df['Drop_m'] - (zero_drop * df['Distance'] / p['zero_dist'])) * 100
+        df['Clicks_V'] = abs(df['Drop_cm'] / (df['Distance'] * 0.1 + 1e-9))
+        df['Clicks_H'] = abs(df['Windage_m'] * 100 / (df['Distance'] * 0.1 + 1e-9))
+    except: pass
+    
+    return df, vsound
 
-    st.download_button("📥 Завантажити повний звіт (CSV)", df.to_csv(index=False), "Magelan242_ELR_Report.csv")
+# --- ИНТЕРФЕЙС ---
+with st.sidebar:
+    st.title("🛡️ Magelan G7 Core")
+    v0 = st.number_input("Начальная скорость (м/с)", value=830.0)
+    bc = st.number_input("БК G7", value=0.310, format="%.3f")
+    weight = st.number_input("Вес кули (гран)", value=175.0)
+    zero_dist = st.number_input("Дистанция пристрелки (м)", value=100)
+    sh = st.number_input("Высота прицела (см)", value=4.5)
 
-except Exception as e:
-    st.error(f"Помилка розрахунку: {e}. Перевірте введені дані.")
+st.title("🏹 Magelan242 Ballistics Pro")
+
+# Кнопки управления
+c_dist, c_wind = st.columns(2)
+with c_dist:
+    st.subheader("🎯 Дистанция")
+    b1, b2, b3 = st.columns([1,2,1])
+    if b1.button("−50"): st.session_state.dist_val -= 50
+    b2.markdown(f"<div class='metric-box'><span style='font-size:24px;'>{st.session_state.dist_val} м</span></div>", unsafe_allow_html=True)
+    if b3.button("+50"): st.session_state.dist_val += 50
+
+with c_wind:
+    st.subheader("💨 Ветер")
+    w1, w2, w3 = st.columns([1,2,1])
+    if w1.button("−1"): st.session_state.wind_val -= 1
+    w2.markdown(f"<div class='metric-box'><span style='font-size:24px;'>{st.session_state.wind_val} м/с</span></div>", unsafe_allow_html=True)
+    if w3.button("+1"): st.session_state.wind_val += 1
+
+# Расчет
+df_res, vsound = run_pro_simulation({
+    'v0': v0, 'bc': bc, 'weight_gr': weight, 'temp': 15, 'pressure': 1013,
+    'w_speed': st.session_state.wind_val, 'w_dir': 3, 'zero_dist': zero_dist, 
+    'max_dist': 1500, 'sh': sh, 't_coeff': 0.1, 'angle': 0
+})
+
+# Данные для текущей дистанции
+row = df_res.iloc[(df_res['Distance'] - st.session_state.dist_val).abs().argsort()[:1]].iloc[0]
+
+# Определение Зоны Поражения
+status_class = "status-safe"
+status_text = "СВЕРХЗВУК (Уверенная зона)"
+if row['Mach'] < 1.2:
+    status_class = "status-warn"
+    status_text = "ТРАНСЗВУК (Низкая стабильность)"
+if row['Mach'] < 1.0:
+    status_class = "status-danger"
+    status_text = "ДОЗВУК (Критическая зона)"
+
+# Вывод метрик
+st.markdown("---")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("ВЕРТИКАЛЬ (Клик 0.1)", f"{row['Clicks_V']:.1f}")
+m2.metric("ГОРИЗОНТАЛЬ (Клик 0.1)", f"{row['Clicks_H']:.1f}")
+m3.metric("ЭНЕРГИЯ (Дж)", f"{int(row['Energy'])}")
+m4.markdown(f"<div style='text-align:center'><small>Статус пули</small><br><span class='{status_class}'>{status_text}</span></div>", unsafe_allow_html=True)
+
+# График с зонами
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df_res['Distance'], y=df_res['Velocity'], name="Скорость", line=dict(color='lime')))
+# Линия скорости звука
+fig.add_hline(y=vsound * 1.2, line_dash="dash", line_color="orange", annotation_text="Груница трансзвука (1.2M)")
+fig.add_vline(x=st.session_state.dist_val, line_color="white")
+
+fig.update_layout(template="plotly_dark", height=400, title="График скорости и стабильности", xaxis_title="Дистанция (м)", yaxis_title="Скорость (м/с)")
+st.plotly_chart(fig, use_container_width=True)
+
+# Таблица прострела
+with st.expander("📊 Таблица поправок (Data Card)"):
+    st.dataframe(df_res[df_res['Distance'] % 100 == 0][['Distance', 'Clicks_V', 'Clicks_H', 'Velocity', 'Mach']].style.format(precision=2))
