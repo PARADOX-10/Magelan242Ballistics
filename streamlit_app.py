@@ -98,21 +98,21 @@ st.title("🛡️ Magelan242 Ballistics Pro")
 # Використання колонок для основних параметрів зверху (для швидкого доступу)
 top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
 with top_col1:
-    dist_input = st.number_input("🎯 Дистанція цілі (м)", 10, 3000, 800)
+    dist_input = st.number_input("🎯 Дистанція цілі (м)", 10, 3000, 1200)
 with top_col2:
-    w_speed = st.slider("💨 Вітер (м/с)", 0.0, 25.0, 2.0)
+    w_speed = st.slider("💨 Вітер (м/с)", 0.0, 25.0, 0.0)
 with top_col3:
     turret_unit = st.selectbox("🔭 Сітка/Кліки", ["MRAD (0.1)", "MOA (1/4)"])
 
 # Експандери для другорядних налаштувань (економія місця на мобільних)
 with st.expander("🚀 Параметри набою та зброї"):
     e_col1, e_col2, e_col3 = st.columns(3)
-    v0 = e_col1.number_input("V0 (м/с)", 200, 1200, 820)
-    bc = e_col2.number_input("BC", 0.01, 1.0, 0.550, format="%.3f")
-    model = e_col3.selectbox("Drag Model", ["G7", "G1"])
-    weight = e_col1.number_input("Вага (гран)", 1, 500, 175)
-    zero_dist = e_col2.number_input("Пристрілка (м)", 1, 1000, 100)
-    twist = e_col3.number_input("Твіст (дюйми)", 5, 20, 10)
+    v0 = e_col1.number_input("V0 (м/с)", 200, 1200, 961)
+    bc = e_col2.number_input("BC", 0.01, 1.0, 0.395, format="%.3f")
+    model = e_col3.selectbox("Drag Model", ["G1", "G7"])
+    weight = e_col1.number_input("Вага (гран)", 1, 500, 200)
+    zero_dist = e_col2.number_input("Пристрілка (м)", 1, 1000, 300)
+    twist = e_col3.number_input("Твіст (дюйми)", 5, 20, 11)
     sh = e_col1.number_input("Висота прицілу (см)", 0.0, 15.0, 5.0)
     t_coeff = e_col2.number_input("Термозалежність (м/с на 1°C)", 0.0, 2.0, 0.1)
 
