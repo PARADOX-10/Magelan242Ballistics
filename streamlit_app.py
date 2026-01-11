@@ -49,11 +49,25 @@ def run_simulation(p):
         mrad_h = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
 
         if d % 5 == 0 or d == p['max_dist']:
+            # Логіка напрямку (Вертикаль)
+            clicks_v_val = abs(mrad_v / 0.1)
+            dir_v = ""
+            if clicks_v_val >= 0.1:
+                # Якщо y_m < 0 (куля нижче), крутимо ВВЕРХ. Якщо y_m > 0 (куля вище), крутимо ВНИЗ.
+                dir_v = "⬆️ UP" if y_m < 0 else "⬇️ DN"
+            
+            # Логіка напрямку (Горизонталь)
+            clicks_h_val = abs(mrad_h / 0.1)
+            dir_h = ""
+            if clicks_h_val >= 0.1:
+                # Якщо mrad_h > 0 (знесення вправо), крутимо ВЛІВО.
+                dir_h = "⬅️ L" if mrad_h > 0 else "➡️ R"
+
             results.append({
                 "Дистанція": d,
                 "Падіння (см)": round(y_m * 100, 1),
-                "Кліки (V)": round(abs(mrad_v / 0.1), 1),
-                "Кліки (H)": round(abs(mrad_h / 0.1), 1),
+                "Кліки (V)": f"{dir_v} {clicks_v_val:.1f}".strip(),
+                "Кліки (H)": f"{dir_h} {clicks_h_val:.1f}".strip(),
                 "Швидкість": round(v_curr, 1),
                 "Енергія": int(energy)
             })
@@ -98,8 +112,9 @@ try:
     # Метрики
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Початкова швидкість", f"{v0_final:.1f} м/с")
-    c2.metric("Кліки (Вертикаль)", int(res['Кліки (V)']))
-    c3.metric("Кліки (Горизонталь)", int(res['Кліки (H)']))
+    # Тут прибрав int(), оскільки значення тепер рядок зі стрілкою
+    c2.metric("Кліки (Вертикаль)", res['Кліки (V)'])
+    c3.metric("Кліки (Горизонталь)", res['Кліки (H)'])
     c4.metric("Швидкість у цілі", f"{res['Швидкість']} м/с")
 
     # Вкладки: Графіки / Картка для друку
@@ -122,8 +137,8 @@ try:
         print_step = st.selectbox("Крок для друку:", [25, 50, 100, 200], index=2)
         print_df = df[df['Дистанція'] % print_step == 0][['Дистанція', 'Кліки (V)', 'Кліки (H)', 'Швидкість', 'Енергія']]
         
-        # Стилізація таблиці для друку
-        st.table(print_df.style.format(precision=1))
+        # Стилізація таблиці для друку (форматування чисел не впливає на текстові стовпці кліків)
+        st.table(print_df.style.format({'Швидкість': '{:.1f}', 'Енергія': '{:.0f}', 'Падіння (см)': '{:.1f}'}))
         st.caption("Примітка: 1 клік = 0.1 MRAD (1 см / 100 м)")
 
 except Exception as e:
