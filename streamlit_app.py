@@ -5,9 +5,9 @@ import plotly.graph_objects as go
 import math
 
 # --- КОНФІГУРАЦІЯ ---
-st.set_page_config(page_title="Magelan242 Pro Mobile", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Magelan242 Pro Mobile UA", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CSS: ТАКТИЧНИЙ СТИЛЬ + КОНТРАСТНІ ВКЛАДКИ ---
+# --- CSS: ТАКТИЧНИЙ СТИЛЬ + КОНТРАСТНІ ВКЛАДКИ + ЗАХИСТ ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
@@ -20,54 +20,45 @@ st.markdown("""
         }
 
         /* --- ПОКРАЩЕНІ ВКЛАДКИ (TABS) --- */
-        /* Контейнер вкладок */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 10px; /* Відступ між кнопками */
+            gap: 8px;
             background-color: transparent;
         }
-
-        /* Стиль НЕАКТИВНОЇ вкладки */
         .stTabs [data-baseweb="tab"] {
-            height: 55px;
-            background-color: #161b22; /* Темно-сірий фон */
+            height: 60px; /* Високі кнопки для пальців */
+            background-color: #161b22;
             border: 1px solid #30363d;
             border-radius: 8px;
-            color: #8b949e; /* Сірий текст */
+            color: #8b949e;
             font-size: 16px;
             font-weight: 700;
-            padding: 0 20px;
-            flex-grow: 1; /* Розтягуємо на всю ширину */
+            padding: 0 10px;
+            flex-grow: 1;
             transition: all 0.2s ease;
         }
-
-        /* Стиль АКТИВНОЇ вкладки */
         .stTabs [aria-selected="true"] {
-            background-color: rgba(0, 255, 65, 0.15) !important; /* Зелене підсвічування */
+            background-color: rgba(0, 255, 65, 0.15) !important;
             border: 1px solid #00ff41 !important;
-            color: #00ff41 !important; /* Яскраво-зелений текст */
-            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+            color: #00ff41 !important;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
         }
 
-        /* Ефект наведення (Hover) */
-        .stTabs [data-baseweb="tab"]:hover {
-            border-color: #8b949e;
-            color: white;
-        }
-
-        /* --- ЗАХИСТ ВІД МІСКЛІКІВ --- */
+        /* --- ЗАХИСТ ВІД МІСКЛІКІВ (МОБІЛЬНИЙ) --- */
         input[type="number"] {
-            min-height: 50px !important; 
+            min-height: 55px !important; 
             font-size: 18px !important;
             padding-left: 15px !important;
             background-color: #0e1117 !important;
             color: white !important;
             border: 1px solid #333 !important;
+            border-radius: 8px !important;
         }
+        /* Великі кнопки +/- */
         button[kind="secondary"] {
-            min-height: 50px !important;
-            min-width: 50px !important;
+            min-height: 55px !important;
+            min-width: 55px !important;
         }
-
+        
         /* --- HUD КАРТКИ --- */
         .hud-card {
             background: rgba(20, 25, 30, 0.8);
@@ -76,12 +67,12 @@ st.markdown("""
             border-radius: 12px;
             padding: 15px;
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
-        .hud-label { color: #888; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 1px;}
-        .hud-value { color: #fff; font-size: 2.2rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,255,65,0.3); }
-        .hud-sub { color: #00ff41; font-size: 0.8rem; }
+        .hud-label { color: #888; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 1px;}
+        .hud-value { color: #fff; font-size: 2.4rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,255,65,0.3); }
+        .hud-sub { color: #00ff41; font-size: 0.85rem; }
 
         h1 { border-bottom: 2px solid #00ff41; padding-bottom: 15px; margin-bottom: 20px; text-transform: uppercase; }
         .block-container { padding-top: 1rem; padding-bottom: 5rem; }
@@ -156,7 +147,7 @@ st.markdown("<h1>🎯 MAGELAN-242 <span style='font-size:0.5em; color:#00ff41'>P
 with st.container():
     c1, c2 = st.columns([2, 1])
     with c1:
-        dist_input = st.number_input("ДИСТАНЦІЯ (м)", 100, 3000, 1200, step=10, help="Цільова дистанція")
+        dist_input = st.number_input("ДИСТАНЦІЯ (м)", 100, 3000, 1200, step=10, help="Крок 10м")
     with c2:
         turret_unit = st.selectbox("КЛІКИ", ["MRAD", "MOA"])
 
@@ -180,13 +171,13 @@ with tab_gun:
     with gc1:
         v0 = st.number_input("V0 (м/с)", 500, 1500, 961, step=5)
         bc = st.number_input("BC", 0.1, 1.0, 0.395, format="%.3f", step=0.005)
-        model = st.radio("Модель", ["G1", "G7"], horizontal=True)
+        model = st.radio("Модель", ["G7", "G1"], horizontal=True)
     with gc2:
         zero_dist = st.number_input("Нуль (м)", 50, 1000, 300, step=50)
         sh = st.number_input("Вис. прицілу (см)", 0.0, 15.0, 5.0, step=0.1)
         twist = st.number_input("Твіст (дюйм)", 5.0, 20.0, 11.0, step=0.1)
         twist_dir = st.radio("Нарізи", ["Right (Правий)", "Left (Лівий)"], horizontal=True)
-        with st.expander("Додатково"):
+        with st.expander("Додатково (Вага/Термо)"):
             weight = st.number_input("Вага (гран)", 50, 1000, 200, step=1)
             t_coeff = st.number_input("Термо %", 0.0, 2.0, 0.1, step=0.1)
 
@@ -212,9 +203,9 @@ def create_hud_card(label, value, sub, color="#00ff41"):
 
 r1, r2 = st.columns(2)
 with r1:
-    st.markdown(create_hud_card("ВЕРТИКАЛЬ", res['UP/DN'], f"Drop: {int(res['Падіння'])} cm", "#ffcc00"), unsafe_allow_html=True)
+    st.markdown(create_hud_card("ВЕРТИКАЛЬ", res['UP/DN'], f"Падіння: {int(res['Падіння'])} см", "#ffcc00"), unsafe_allow_html=True)
 with r2:
-    st.markdown(create_hud_card("ГОРИЗОНТАЛЬ", res['L/R'], "Wind + Spin", "#ffcc00"), unsafe_allow_html=True)
+    st.markdown(create_hud_card("ГОРИЗОНТАЛЬ", res['L/R'], "Вітер + Деривація", "#ffcc00"), unsafe_allow_html=True)
 
 r3, r4 = st.columns(2)
 with r3:
@@ -241,6 +232,7 @@ with tab_vis:
 
     fig = go.Figure()
 
+    # Зелена дуга
     fig.add_trace(go.Scatter(
         x=x_data, y=y_arc,
         mode='lines',
@@ -249,15 +241,17 @@ with tab_vis:
         fill='tozeroy', fillcolor='rgba(0, 255, 65, 0.1)'
     ))
 
+    # Жовта точка (Макс. висота)
     fig.add_trace(go.Scatter(
         x=[dist_at_max], y=[max_h_val],
         mode='markers+text',
-        text=[f"MAX: {max_h_val:.0f}"],
+        text=[f"МАКС: {max_h_val:.0f}"],
         textposition="top center",
         textfont=dict(color="#ffcc00"),
         marker=dict(color='#ffcc00', size=10, symbol='diamond')
     ))
 
+    # Червоний хрест (Абсолютне падіння)
     fig.add_trace(go.Scatter(
         x=[x_data[-1]], y=[drop_at_target],
         mode='markers+text',
@@ -267,6 +261,7 @@ with tab_vis:
         marker=dict(color='#ff3333', size=12, symbol='x')
     ))
 
+    # Червона пунктирна лінія
     fig.add_trace(go.Scatter(
         x=[x_data[-1], x_data[-1]],
         y=[0, drop_at_target],
