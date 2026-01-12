@@ -31,14 +31,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def run_simulation(p):
-    # 1. Корекція V0 по температурі
     v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
-    
-    # 2. Щільність повітря (Ideal Gas Law)
     tk = p['temp'] + 273.15
     rho = (p['pressure'] * 100) / (287.05 * tk)
-    
-    # 3. Балістичний коефіцієнт (Pejsa approximation const)
     k_drag = 0.5 * rho * (1/p['bc']) * 0.00052
     if p['model'] == "G7": k_drag *= 0.91
 
@@ -47,7 +42,6 @@ def run_simulation(p):
     weight_kg = p['weight_gr'] * 0.0000647989
     angle_rad = math.radians(p['angle'])
     
-    # Вітер: розкладання вектора
     wind_rad = math.radians(p['w_dir'] * 30)
     w_long = p['w_speed'] * math.cos(wind_rad)
     w_cross = p['w_speed'] * math.sin(wind_rad)
@@ -59,29 +53,18 @@ def run_simulation(p):
     t_dir = 1 if p['twist_dir'] == "Right (Правий)" else -1
 
     for d in range(0, p['max_dist'] + 1, 5):
-        # 4. Час польоту
         v0_eff = v0_corr - w_long 
         t = d / (v0_eff * math.exp(-k_drag * d / 2)) if d > 0 else 0
-        
-        # 5. Гравітаційне падіння
         drop = 0.5 * g * (t**2) * math.cos(angle_rad)
-        
-        # Розрахунок пристрілки
         t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
         drop_zero = 0.5 * g * (t_zero**2)
-        
-        # Висота траєкторії (базова, відносно Zero Distance)
         y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
         
-        # 6. Аеродинамічний стрибок
         aero_jump_mrad = 0.025 * w_cross * t_dir
         aero_jump_cm = aero_jump_mrad * (d / 10) 
         y_m += (aero_jump_cm / 100)
         
-        # 7. Горизонтальне знесення
         wind_drift = w_cross * (t - (d/v0_corr)) if d > 0 else 0
-        
-        # 8. Деривація
         derivation = -1 * 0.05 * (10 / p['twist']) * (d / 100)**2 * t_dir if d > 0 else 0
         
         v_curr = v0_corr * math.exp(-k_drag * d)
@@ -105,7 +88,7 @@ def run_simulation(p):
             "L/R": f"{dir_h} {c_h:.1f}",
             "V, м/с": int(v_curr),
             "E, Дж": int(energy),
-            "Падіння": y_m * 100 # Зберігаємо точне значення для розрахунків графіку
+            "Падіння": y_m * 100
         })
     return pd.DataFrame(results), v0_corr
 
@@ -184,43 +167,56 @@ try:
 
     with tab_chart:
         # --- РОЗРАХУНОК ДУГИ 0-0 ---
-        # Беремо дані падіння (Y)
         y_data = df['Падіння'].values
         x_data = df['Дист.'].values
         
-        # Значення на старті та в кінці
-        y_start = y_data[0] # Зазвичай -Висота прицілу
-        y_end = y_data[-1]  # Падіння на макс дистанції
-        
-        # 1. Зсуваємо старт в 0 (компенсуємо висоту прицілу візуально)
+        # Вирівнювання (Tilt)
+        y_start = y_data[0]
         y_shifted = y_data - y_start
-        
-        # 2. Розраховуємо кут нахилу, щоб кінець теж став 0
-        # Нам треба "повернути" графік так, щоб точка (max_dist, y_end_shifted) стала (max_dist, 0)
         y_end_shifted = y_shifted[-1]
         slope = -y_end_shifted / x_data[-1] if x_data[-1] > 0 else 0
-        
-        # 3. Фінальна дуга
         y_arc = y_shifted + slope * x_data
 
+        # --- РОЗРАХУНОК МАКСИМАЛЬНОЇ ВИСОТИ ---
+        max_h_val = np.max(y_arc)
+        max_h_idx = np.argmax(y_arc)
+        dist_at_max = x_data[max_h_idx]
+        
+        # Вивід інформації про висоту
+        st.info(f"🏔️ **Максимальний підйом кулі:** {max_h_val:.1f} см на дистанції {dist_at_max} м")
+
         fig = make_subplots(rows=1, cols=1)
+        
+        # Лінія траєкторії
         fig.add_trace(go.Scatter(
             x=x_data, 
             y=y_arc, 
-            name="Дуга траєкторії", 
+            name="Траєкторія", 
             line=dict(color='#00ff00', width=3),
             fill='tozeroy',
             fillcolor='rgba(0, 255, 0, 0.1)'
         ))
+
+        # Маркер максимальної висоти
+        fig.add_trace(go.Scatter(
+            x=[dist_at_max],
+            y=[max_h_val],
+            mode='markers+text',
+            name='Макс. висота',
+            text=[f"{max_h_val:.0f} см"],
+            textposition="top center",
+            textfont=dict(color="yellow", size=14),
+            marker=dict(color='yellow', size=10, symbol='diamond')
+        ))
         
-        # Налаштування осей для красивого вигляду
         fig.update_layout(
             template="plotly_dark", 
             height=350, 
             margin=dict(l=10, r=10, t=30, b=10),
-            title="Траєкторія польоту (приціл налаштовано на ціль)",
+            title="Траєкторія польоту (Max Ordinate)",
             yaxis_title="Висота (см)",
-            xaxis_title="Дистанція (м)"
+            xaxis_title="Дистанція (м)",
+            showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
 
