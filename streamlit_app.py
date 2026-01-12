@@ -159,8 +159,8 @@ tab_env, tab_gun, tab_vis = st.tabs(["🌪️ УМОВИ", "🔫 ЗБРОЯ", "�
 with tab_env:
     ec1, ec2 = st.columns(2)
     with ec1:
-        w_speed = st.number_input("Вітер (м/с)", 0.0, 30.0, 4.0, step=0.5)
-        w_dir = st.number_input("Напрям (год)", 1, 12, 3, step=1)
+        w_speed = st.number_input("Вітер (м/с)", 0.0, 30.0, 0.0, step=0.5)
+        w_dir = st.number_input("Напрям (год)", 1, 12, 12, step=1)
     with ec2:
         temp = st.number_input("Темп. (°C)", -50, 60, 15, step=1)
         press = st.number_input("Тиск (hPa)", 800, 1200, 1013, step=5)
@@ -171,7 +171,7 @@ with tab_gun:
     with gc1:
         v0 = st.number_input("V0 (м/с)", 500, 1500, 961, step=5)
         bc = st.number_input("BC", 0.1, 1.0, 0.395, format="%.3f", step=0.005)
-        model = st.radio("Модель", ["G7", "G1"], horizontal=True)
+        model = st.radio("Модель", ["G1", "G7"], horizontal=True)
     with gc2:
         zero_dist = st.number_input("Нуль (м)", 50, 1000, 300, step=50)
         sh = st.number_input("Вис. прицілу (см)", 0.0, 15.0, 5.0, step=0.1)
