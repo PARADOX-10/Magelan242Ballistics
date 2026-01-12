@@ -7,7 +7,7 @@ import math
 # --- КОНФІГУРАЦІЯ ---
 st.set_page_config(page_title="Magelan242 Pro Mobile", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CSS: ТАКТИЧНИЙ СТИЛЬ + ЗАХИСТ ВІД МІСКЛІКІВ ---
+# --- CSS: ТАКТИЧНИЙ СТИЛЬ + КОНТРАСТНІ ВКЛАДКИ ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
@@ -19,8 +19,42 @@ st.markdown("""
             color: #e0e0e0;
         }
 
-        /* --- ЗАХИСТ ВІД МІСКЛІКІВ (МОБІЛЬНИЙ) --- */
-        /* Високі поля вводу */
+        /* --- ПОКРАЩЕНІ ВКЛАДКИ (TABS) --- */
+        /* Контейнер вкладок */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 10px; /* Відступ між кнопками */
+            background-color: transparent;
+        }
+
+        /* Стиль НЕАКТИВНОЇ вкладки */
+        .stTabs [data-baseweb="tab"] {
+            height: 55px;
+            background-color: #161b22; /* Темно-сірий фон */
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            color: #8b949e; /* Сірий текст */
+            font-size: 16px;
+            font-weight: 700;
+            padding: 0 20px;
+            flex-grow: 1; /* Розтягуємо на всю ширину */
+            transition: all 0.2s ease;
+        }
+
+        /* Стиль АКТИВНОЇ вкладки */
+        .stTabs [aria-selected="true"] {
+            background-color: rgba(0, 255, 65, 0.15) !important; /* Зелене підсвічування */
+            border: 1px solid #00ff41 !important;
+            color: #00ff41 !important; /* Яскраво-зелений текст */
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+        }
+
+        /* Ефект наведення (Hover) */
+        .stTabs [data-baseweb="tab"]:hover {
+            border-color: #8b949e;
+            color: white;
+        }
+
+        /* --- ЗАХИСТ ВІД МІСКЛІКІВ --- */
         input[type="number"] {
             min-height: 50px !important; 
             font-size: 18px !important;
@@ -29,18 +63,11 @@ st.markdown("""
             color: white !important;
             border: 1px solid #333 !important;
         }
-        /* Великі кнопки +/- */
         button[kind="secondary"] {
             min-height: 50px !important;
             min-width: 50px !important;
         }
-        /* Великі вкладки */
-        button[data-baseweb="tab"] {
-            font-size: 16px !important;
-            padding: 15px !important;
-            flex-grow: 1;
-        }
-        
+
         /* --- HUD КАРТКИ --- */
         .hud-card {
             background: rgba(20, 25, 30, 0.8);
@@ -56,15 +83,12 @@ st.markdown("""
         .hud-value { color: #fff; font-size: 2.2rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,255,65,0.3); }
         .hud-sub { color: #00ff41; font-size: 0.8rem; }
 
-        /* Заголовок */
         h1 { border-bottom: 2px solid #00ff41; padding-bottom: 15px; margin-bottom: 20px; text-transform: uppercase; }
-        
-        /* Прибираємо відступи */
         .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ФІЗИЧНЕ ЯДРО (ПОВНЕ) ---
+# --- ФІЗИЧНЕ ЯДРО ---
 def run_simulation(p):
     v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
     tk = p['temp'] + 273.15
@@ -86,34 +110,23 @@ def run_simulation(p):
     t_dir = 1 if p['twist_dir'] == "Right (Правий)" else -1
 
     for d in range(0, p['max_dist'] + 1, 5):
-        # 1. Час польоту (з урахуванням зустрічного вітру)
         v0_eff = v0_corr - w_long 
         t = d / (v0_eff * math.exp(-k_drag * d / 2)) if d > 0 else 0
-        
-        # 2. Гравітація (з урахуванням кута місця)
         drop = 0.5 * g * (t**2) * math.cos(angle_rad)
-        
-        # 3. Пристрілка
         t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
         drop_zero = 0.5 * g * (t_zero**2)
         y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
         
-        # 4. Аеродинамічний стрибок
         aero_jump_mrad = 0.025 * w_cross * t_dir
         aero_jump_cm = aero_jump_mrad * (d / 10) 
         y_m += (aero_jump_cm / 100)
         
-        # 5. Вітер (Lag)
         wind_drift = w_cross * (t - (d/v0_corr)) if d > 0 else 0
-        
-        # 6. Деривація
         derivation = -1 * 0.05 * (10 / p['twist']) * (d / 100)**2 * t_dir if d > 0 else 0
         
-        # Енергетика
         v_curr = v0_corr * math.exp(-k_drag * d)
         energy = (weight_kg * v_curr**2) / 2
         
-        # Кліки
         mrad_v_raw = (y_m * 100) / (d / 10) if d > 0 else 0
         mrad_h_raw = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
 
@@ -132,7 +145,7 @@ def run_simulation(p):
             "L/R": f"{dir_h} {c_h:.1f}",
             "V, м/с": int(v_curr),
             "E, Дж": int(energy),
-            "Падіння": y_m * 100 # Зберігаємо для графіка
+            "Падіння": y_m * 100
         })
     return pd.DataFrame(results), v0_corr
 
@@ -140,7 +153,6 @@ def run_simulation(p):
 
 st.markdown("<h1>🎯 MAGELAN-242 <span style='font-size:0.5em; color:#00ff41'>PRO</span></h1>", unsafe_allow_html=True)
 
-# Головний контейнер вводу
 with st.container():
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -150,7 +162,7 @@ with st.container():
 
 st.markdown("---")
 
-# Вкладки налаштувань (Безпечні для мобільного)
+# ЯСКРАВІ ВКЛАДКИ
 tab_env, tab_gun, tab_vis = st.tabs(["🌪️ УМОВИ", "🔫 ЗБРОЯ", "📈 АНАЛІЗ"])
 
 with tab_env:
@@ -214,27 +226,21 @@ with r4:
 with tab_vis:
     st.markdown("### 📉 Траєкторія польоту")
     
-    # Підготовка даних для графіка
     y_data = df['Падіння'].values
     x_data = df['Дист.'].values
     
-    # 1. Трансформація дуги (0-to-0)
     y_shifted = y_data - y_data[0]
     slope = -y_shifted[-1] / x_data[-1] if x_data[-1] > 0 else 0
     y_arc = y_shifted + slope * x_data
     
-    # 2. Пошук максимумів
     max_h_val = np.max(y_arc)
     max_h_idx = np.argmax(y_arc)
     dist_at_max = x_data[max_h_idx]
     
-    # 3. Абсолютне падіння на фінальній точці
     drop_at_target = y_data[-1]
 
-    # Plotly
     fig = go.Figure()
 
-    # Зелена дуга (Політ з поправкою)
     fig.add_trace(go.Scatter(
         x=x_data, y=y_arc,
         mode='lines',
@@ -243,7 +249,6 @@ with tab_vis:
         fill='tozeroy', fillcolor='rgba(0, 255, 65, 0.1)'
     ))
 
-    # Жовта точка (Макс. висота)
     fig.add_trace(go.Scatter(
         x=[dist_at_max], y=[max_h_val],
         mode='markers+text',
@@ -253,7 +258,6 @@ with tab_vis:
         marker=dict(color='#ffcc00', size=10, symbol='diamond')
     ))
 
-    # Червоний хрест (Абсолютне падіння)
     fig.add_trace(go.Scatter(
         x=[x_data[-1]], y=[drop_at_target],
         mode='markers+text',
@@ -263,7 +267,6 @@ with tab_vis:
         marker=dict(color='#ff3333', size=12, symbol='x')
     ))
 
-    # Червона пунктирна лінія
     fig.add_trace(go.Scatter(
         x=[x_data[-1], x_data[-1]],
         y=[0, drop_at_target],
@@ -304,13 +307,3 @@ with tab_vis:
             "Падіння": st.column_config.NumberColumn("ПАД", format="%d"),
         }
     )
-    
-    st.markdown("#### 📚 Враховані фактори:")
-    st.markdown("""
-    <div style="font-size: 14px; color: #888;">
-    • <b>Атмосфера:</b> Щільність повітря, темп. пороху.<br>
-    • <b>Вітер:</b> Зустрічний (на час), Боковий (Lag Method).<br>
-    • <b>Спін:</b> Деривація (Spin Drift) та Аеродинамічний стрибок.<br>
-    • <b>Геометрія:</b> Кут місця цілі, висота прицілу.
-    </div>
-    """, unsafe_allow_html=True)
