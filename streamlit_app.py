@@ -180,7 +180,7 @@ with tab_gun:
     with gc1:
         v0 = st.number_input("V0 (м/с)", 500, 1500, 961, step=5)
         bc = st.number_input("BC", 0.1, 1.0, 0.395, format="%.3f", step=0.005)
-        model = st.radio("Модель", ["G7", "G1"], horizontal=True)
+        model = st.radio("Модель", ["G1", "G7"], horizontal=True)
     with gc2:
         zero_dist = st.number_input("Нуль (м)", 50, 1000, 300, step=50)
         sh = st.number_input("Вис. прицілу (см)", 0.0, 15.0, 5.0, step=0.1)
