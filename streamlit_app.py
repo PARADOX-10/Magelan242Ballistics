@@ -142,7 +142,16 @@ def run_simulation(p):
 
 # --- ІНТЕРФЕЙС ---
 
-st.markdown("<h1>🎯 БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР <span style='font-size:0.5em; color:#00ff41'>by Magelan242</span></h1>", unsafe_allow_html=True)
+# --- ШАПКА З ЛОГОТИПОМ ---
+col_logo, col_header = st.columns([1, 5])
+
+with col_logo:
+    # Відображення логотипу. Переконайтеся, що logo.png поруч з файлом коду.
+    st.image("logo.png", use_container_width=True)
+
+with col_header:
+    st.markdown("<h1>🎯 БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР <span style='font-size:0.5em; color:#00ff41'>by Magelan242</span></h1>", unsafe_allow_html=True)
+# -------------------------
 
 with st.container():
     c1, c2 = st.columns([2, 1])
