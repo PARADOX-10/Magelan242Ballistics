@@ -3,11 +3,19 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import math
+import base64
+import os
 
 # --- КОНФІГУРАЦІЯ ---
 st.set_page_config(page_title="Magelan242 Pro Mobile UA", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CSS: ТАКТИЧНИЙ СТИЛЬ + КОНТРАСТНІ ВКЛАДКИ + ЗАХИСТ ---
+# --- ФУНКЦІЯ ДЛЯ ЗАВАНТАЖЕННЯ ЛОГОТИПУ В HTML ---
+def get_img_as_base64(file):
+    with open(file, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
+
+# --- CSS: СТИЛІ + АДАПТИВНІСТЬ ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
@@ -19,13 +27,60 @@ st.markdown("""
             color: #e0e0e0;
         }
 
+        /* --- АДАПТИВНА ШАПКА (HEADER) --- */
+        .header-container {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 20px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #00ff41;
+            margin-bottom: 20px;
+        }
+        
+        /* Логотип: Стандартний розмір (Desktop) */
+        .responsive-logo {
+            width: 120px;
+            height: auto;
+            transition: width 0.3s ease;
+        }
+
+        /* Текст заголовка (Desktop) */
+        .header-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            line-height: 1.2;
+            margin: 0;
+        }
+        
+        .header-sub {
+            font-size: 0.5em;
+            color: #00ff41;
+            display: block;
+        }
+
+        /* --- МОБІЛЬНА ВЕРСІЯ (Екрани менше 768px) --- */
+        @media (max-width: 768px) {
+            .header-container {
+                gap: 15px; /* Менший відступ */
+                padding-bottom: 15px;
+            }
+            .responsive-logo {
+                width: 60px; /* Зменшений логотип для телефону */
+            }
+            .header-title {
+                font-size: 1.4rem; /* Менший шрифт заголовка */
+            }
+        }
+
         /* --- ПОКРАЩЕНІ ВКЛАДКИ (TABS) --- */
         .stTabs [data-baseweb="tab-list"] {
             gap: 8px;
             background-color: transparent;
         }
         .stTabs [data-baseweb="tab"] {
-            height: 60px; /* Високі кнопки для пальців */
+            height: 60px; 
             background-color: #161b22;
             border: 1px solid #30363d;
             border-radius: 8px;
@@ -43,7 +98,7 @@ st.markdown("""
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
         }
 
-        /* --- ЗАХИСТ ВІД МІСКЛІКІВ (МОБІЛЬНИЙ) --- */
+        /* --- ЗАХИСТ ВІД МІСКЛІКІВ --- */
         input[type="number"] {
             min-height: 55px !important; 
             font-size: 18px !important;
@@ -53,7 +108,6 @@ st.markdown("""
             border: 1px solid #333 !important;
             border-radius: 8px !important;
         }
-        /* Великі кнопки +/- */
         button[kind="secondary"] {
             min-height: 55px !important;
             min-width: 55px !important;
@@ -74,7 +128,6 @@ st.markdown("""
         .hud-value { color: #fff; font-size: 2.4rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,255,65,0.3); }
         .hud-sub { color: #00ff41; font-size: 0.85rem; }
 
-        h1 { border-bottom: 2px solid #00ff41; padding-bottom: 15px; margin-bottom: 20px; text-transform: uppercase; }
         .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     </style>
 """, unsafe_allow_html=True)
@@ -142,15 +195,27 @@ def run_simulation(p):
 
 # --- ІНТЕРФЕЙС ---
 
-# --- ШАПКА З ЛОГОТИПОМ ---
-col_logo, col_header = st.columns([1, 5])
+# --- ШАПКА З АДАПТИВНИМ ЛОГОТИПОМ ---
+# Спроба завантажити логотип, якщо файл існує
+logo_html = ""
+logo_path = "logo.png"
 
-with col_logo:
-    # Відображення логотипу. Переконайтеся, що logo.png поруч з файлом коду.
-    st.image("logo.png", use_container_width=True)
+if os.path.exists(logo_path):
+    img_b64 = get_img_as_base64(logo_path)
+    logo_html = f'<img src="data:image/png;base64,{img_b64}" class="responsive-logo">'
+else:
+    # Заглушка, якщо файлу немає (щоб не крашилось)
+    logo_html = '<div style="font-size:3rem;">🎯</div>'
 
-with col_header:
-    st.markdown("<h1>🎯 БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР <span style='font-size:0.5em; color:#00ff41'>by Magelan242</span></h1>", unsafe_allow_html=True)
+st.markdown(f"""
+    <div class="header-container">
+        {logo_html}
+        <div class="header-title">
+            БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР 
+            <span class="header-sub">by Magelan242</span>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 # -------------------------
 
 with st.container():
