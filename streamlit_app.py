@@ -9,31 +9,24 @@ import time
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="Magelan242 HUD UA", layout="wide", initial_sidebar_state="collapsed")
 
-# --- СУЧАСНИЙ UI / CSS МАГІЯ (Стилі ті самі, адаптовані під кирилицю) ---
+# --- СУЧАСНИЙ UI / CSS МАГІЯ ---
 st.markdown("""
     <style>
-        /* ІМПОРТ ШРИФТУ ROBOTO MONO (Підтримує кирилицю) */
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
-
-        /* ЗАГАЛЬНИЙ ФОН */
         .stApp {
             background-color: #050505;
             background-image: radial-gradient(circle at 50% 50%, #111418 0%, #050505 100%);
             font-family: 'Roboto Mono', monospace;
             color: #e0e0e0;
         }
-
-        /* АНІМАЦІЯ ПОЯВИ */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translate3d(0, 20px, 0); }
             to { opacity: 1; transform: translate3d(0, 0, 0); }
         }
-
-        /* КАСТОМНІ КАРТКИ (HUD CARDS) */
         .hud-card {
             background: rgba(20, 25, 30, 0.7);
             border: 1px solid #333;
-            border-left: 3px solid #00ff41; /* Tactical Green */
+            border-left: 3px solid #00ff41;
             border-radius: 8px;
             padding: 15px;
             text-align: center;
@@ -43,7 +36,7 @@ st.markdown("""
             transition: all 0.3s ease;
         }
         .hud-card:hover {
-            border-left: 3px solid #ffcc00; /* Amber on hover */
+            border-left: 3px solid #ffcc00;
             box-shadow: 0 6px 20px rgba(255, 204, 0, 0.2);
             transform: translateY(-2px);
         }
@@ -62,27 +55,21 @@ st.markdown("""
         }
         .hud-sub {
             font-size: 0.8rem;
-            color: #00ff41; /* Green Accent */
+            color: #00ff41;
             margin-top: 5px;
         }
-        
-        /* СТИЛІЗАЦІЯ ВВОДУ */
         div[data-baseweb="input"] {
             background-color: #0e1117 !important;
             border: 1px solid #30363d !important;
             color: white !important;
             border-radius: 4px !important;
         }
-        
-        /* СТИЛІЗАЦІЯ ТАБЛИЦІ */
         [data-testid="stDataFrame"] {
             border: 1px solid #333;
             border-radius: 5px;
             overflow: hidden;
             animation: fadeInUp 0.8s ease-out;
         }
-
-        /* ЗАГОЛОВОК */
         h1 {
             color: #fff;
             text-transform: uppercase;
@@ -92,8 +79,6 @@ st.markdown("""
             display: inline-block;
             padding-bottom: 10px;
         }
-
-        /* СКРИТИ ЗАЙВЕ ПРИ ДРУКУ */
         @media print {
             .stApp { background: white; color: black; }
             .hud-card { border: 1px solid black; box-shadow: none; color: black; }
@@ -103,7 +88,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ФІЗИЧНЕ ЯДРО (БЕЗ ЗМІН) ---
+# --- ФІЗИЧНЕ ЯДРО ---
 def run_simulation(p):
     v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
     tk = p['temp'] + 273.15
@@ -165,19 +150,15 @@ def run_simulation(p):
         })
     return pd.DataFrame(results), v0_corr
 
-# --- UI ЛОГІКА (УКРАЇНСЬКА МОВА) ---
-
-# Заголовок з іконкою
+# --- UI ЛОГІКА ---
 st.markdown("<h1>🎯 MAGELAN-242 <span style='font-size:0.5em; color:#666'>ТАКТИЧНИЙ ІНТЕРФЕЙС</span></h1>", unsafe_allow_html=True)
 
-# Верхня панель (Швидкий доступ)
 col_dist, col_unit = st.columns([2, 1])
 with col_dist:
     dist_input = st.number_input("ДИСТАНЦІЯ ДО ЦІЛІ (Метри)", 10, 3000, 1200, step=10)
 with col_unit:
     turret_unit = st.selectbox("СИСТЕМА (КЛІКИ)", ["MRAD (0.1)", "MOA (1/4)"])
 
-# Налаштування (Collapsible)
 with st.expander("🛠️ НАЛАШТУВАННЯ ЗБРОЇ"):
     c1, c2, c3 = st.columns(3)
     v0 = c1.number_input("V0 (м/с)", 200, 1500, 961)
@@ -198,22 +179,18 @@ with st.expander("🌪️ АТМОСФЕРА ТА УМОВИ"):
     w_speed = c1.slider("Швидкість вітру (м/с)", 0.0, 30.0, 4.0)
     w_dir = c2.slider("Напрям вітру (год)", 1, 12, 3)
 
-# Розрахунок
 params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp,
           'pressure': press, 'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle,
           'twist': twist, 'zero_dist': zero_dist, 'max_dist': dist_input, 'sh': sh, 
           't_coeff': t_coeff, 'turret_unit': turret_unit, 'twist_dir': twist_dir}
 
-# Імітація обробки даних
 with st.spinner('РОЗРАХУНОК БАЛІСТИКИ...'):
     df, v0_final = run_simulation(params)
     res = df.iloc[-1]
 
-# --- ВІДОБРАЖЕННЯ РЕЗУЛЬТАТІВ (HUD CARDS) ---
 st.markdown("<br>", unsafe_allow_html=True)
 hud1, hud2, hud3, hud4 = st.columns(4)
 
-# Функція для генерації HTML картки
 def create_card(label, value, sub, color="#00ff41"):
     return f"""
     <div class="hud-card">
@@ -237,47 +214,68 @@ st.markdown("<br>", unsafe_allow_html=True)
 tab_graph, tab_data = st.tabs(["📉 ВІЗУАЛІЗАЦІЯ", "📋 ДЕТАЛЬНА ТАБЛИЦЯ"])
 
 with tab_graph:
-    # Розрахунок дуги
-    y_data = df['Падіння'].values
+    # Дані для графіків
+    y_data = df['Падіння'].values # Абсолютне падіння
     x_data = df['Дист.'].values
+    
+    # Розрахунок дуги (Траєкторія з поправкою)
     y_shifted = y_data - y_data[0]
     slope = -y_shifted[-1] / x_data[-1] if x_data[-1] > 0 else 0
     y_arc = y_shifted + slope * x_data
     
-    # Макс. висота
+    # Макс. висота на дузі
     max_h_val = np.max(y_arc)
     max_h_idx = np.argmax(y_arc)
     dist_at_max = x_data[max_h_idx]
 
-    # Plotly з неоновим стилем
     fig = go.Figure()
 
-    # Заливка під графіком
+    # 1. Основна траєкторія (Зелена дуга)
     fig.add_trace(go.Scatter(
         x=x_data, y=y_arc,
         mode='lines',
-        name='Траєкторія',
+        name='Траєкторія (з поправкою)',
         line=dict(color='#00ff41', width=4, shape='spline'),
         fill='tozeroy',
         fillcolor='rgba(0, 255, 65, 0.1)'
     ))
 
-    # Точка максимуму
+    # 2. Точка максимуму (Жовтий хрестик)
     fig.add_trace(go.Scatter(
         x=[dist_at_max], y=[max_h_val],
         mode='markers+text',
         text=[f"МАКС: {max_h_val:.0f}см"],
         textposition="top center",
         textfont=dict(family="Roboto Mono", size=12, color="#ffcc00"),
-        marker=dict(color='#ffcc00', size=12, symbol='cross')
+        marker=dict(color='#ffcc00', size=12, symbol='cross', line=dict(width=2, color='#ffcc00'))
+    ))
+
+    # 3. Точка абсолютного падіння (Червоний хрест внизу)
+    drop_at_target = y_data[-1]
+    fig.add_trace(go.Scatter(
+        x=[x_data[-1]], y=[drop_at_target],
+        mode='markers+text',
+        text=[f"Без поправки: {drop_at_target:.0f} см"],
+        textposition="bottom center",
+        textfont=dict(family="Roboto Mono", size=12, color="#ff3333"),
+        marker=dict(color='#ff3333', size=12, symbol='x', line=dict(width=2))
+    ))
+
+    # 4. Червона лінія, що показує величину падіння
+    fig.add_trace(go.Scatter(
+        x=[x_data[-1], x_data[-1]],
+        y=[0, drop_at_target],
+        mode='lines',
+        line=dict(color='#ff3333', width=2, dash='dash'),
+        hoverinfo='skip'
     ))
 
     # Стилізація Plotly
     fig.update_layout(
         template="plotly_dark",
-        paper_bgcolor='rgba(0,0,0,0)', # Прозорий фон
+        paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,15,20,0.5)',
-        height=400,
+        height=450, # Трохи збільшив висоту
         margin=dict(l=20, r=20, t=40, b=20),
         xaxis=dict(
             title="ДИСТАНЦІЯ (м)", 
@@ -289,10 +287,11 @@ with tab_graph:
             gridcolor='#333', 
             zerolinecolor='#555'
         ),
-        hovermode="x unified"
+        hovermode="x unified",
+        showlegend=False
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"ℹ️ Максимальний підйом траєкторії: {max_h_val:.1f} см на дистанції {dist_at_max} м")
+    st.caption(f"ℹ️ Зелена лінія: політ при налаштованому прицілі. Червона точка: де була б куля без налаштування.")
 
 with tab_data:
     p_step = st.select_slider("КРОК ТАБЛИЦІ (м)", [10, 25, 50, 100], value=50)
