@@ -14,16 +14,15 @@ st.markdown("""
     .main { background-color: #0e1117; }
     div[data-testid="stMetric"] {
         background-color: #1a1c24;
-        padding: 15px;
+        padding: 10px; /* Трохи менше відступів для мобілок */
         border-radius: 12px;
         border: 1px solid #30363d;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     [data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
+        font-size: 1.6rem !important; /* Адаптивний шрифт */
         color: #00ff00 !important;
     }
-    .stTable { font-size: 14px; }
     @media print {
         .stButton, .stTabs, .sidebar, [data-testid="stSidebar"] { display: none !important; }
         .main { background-color: white !important; color: black !important; }
@@ -105,16 +104,16 @@ def run_simulation(p):
         c_h = abs(val_h / click_val)
 
         # Індикація напрямку (КОРЕКЦІЯ)
-        dir_v = "⬆️ UP" if y_m < 0 else "⬇️ DN"
-        dir_h = "➡️ R" if mrad_h_raw > 0 else "⬅️ L"
+        dir_v = "⬆️" if y_m < 0 else "⬇️"
+        dir_h = "➡️" if mrad_h_raw > 0 else "⬅️"
 
         results.append({
-            "Дистанція": d,
-            "Падіння (см)": round(y_m * 100, 1),
-            "Кліки (V)": f"{dir_v} {c_v:.1f}",
-            "Кліки (H)": f"{dir_h} {c_h:.1f}",
-            "Швидкість": round(v_curr, 1),
-            "Енергія": int(energy)
+            "Дист.": d,
+            "UP/DN": f"{dir_v} {c_v:.1f}", # Коротша назва
+            "L/R": f"{dir_h} {c_h:.1f}",   # Коротша назва
+            "V, м/с": int(v_curr),         # Прибрали дробову частину
+            "E, Дж": int(energy),
+            "Падіння": round(y_m * 100, 0) # Прибрали дробову частину для см
         })
     return pd.DataFrame(results), v0_corr
 
@@ -158,32 +157,48 @@ try:
     
     st.markdown("---")
     res_col1, res_col2, res_col3, res_col4 = st.columns(4)
-    res_col1.metric("ВЕРТИКАЛЬ", res['Кліки (V)'], delta=f"{res['Падіння (см)']} см")
-    res_col2.metric("ГОРИЗОНТАЛЬ", res['Кліки (H)'])
-    res_col3.metric("ШВИДКІСТЬ", f"{res['Швидкість']} м/с")
-    res_col4.metric("ЕНЕРГІЯ", f"{res['Енергія']} Дж")
+    # Скорочені підписи для карток, щоб не розривало на мобільному
+    res_col1.metric("UP/DN", res['UP/DN'], delta=f"{res['Падіння']} см")
+    res_col2.metric("L/R", res['L/R'])
+    res_col3.metric("V", f"{res['V, м/с']} м/с")
+    res_col4.metric("E", f"{res['E, Дж']} Дж")
 
-    tab_table, tab_chart = st.tabs(["📋 Таблиця поправок", "📊 Графіки"])
+    tab_table, tab_chart = st.tabs(["📋 Таблиця", "📊 Графік"]) # Коротші назви вкладок
     with tab_table:
-        p_step = st.select_slider("Крок таблиці (м)", options=[10, 25, 50, 100], value=100)
-        st.dataframe(df[df['Дистанція'] % p_step == 0], use_container_width=True, hide_index=True)
+        p_step = st.select_slider("Крок таблиці (м)", options=[10, 25, 50, 100], value=50)
         
-        # --- ДОДАНИЙ ПЕРЕЛІК ---
+        # Підготовка компактного DataFrame для відображення
+        display_df = df[df['Дист.'] % p_step == 0].copy()
+        
+        # Використовуємо st.dataframe з конфігурацією колонок для кращого відображення на мобільному
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Дист.": st.column_config.NumberColumn("Дист", format="%d м"),
+                "UP/DN": st.column_config.TextColumn("Верт.", help="Поправка по вертикалі"),
+                "L/R": st.column_config.TextColumn("Гориз.", help="Поправка по горизонталі"),
+                "V, м/с": st.column_config.NumberColumn("V", format="%d"),
+                "E, Дж": st.column_config.NumberColumn("E", format="%d"),
+                "Падіння": st.column_config.NumberColumn("Пад.", format="%d см"),
+            }
+        )
+        
         st.markdown("---")
         st.subheader("📚 Враховані балістичні фактори:")
         st.markdown("""
-        * **Атмосфера та Середовище:** Щільність повітря (тиск/темп), Термозалежність пороху.
-        * **Аеродинаміка:** Аеродинамічний опір (Drag), BC, Модель G1/G7. 
-        * **Вплив вітру (Векторний):** Горизонтальне знесення (Lag Method), Вплив зустрічного/попутного вітру на вертикаль. 
-        * **Гіроскопічні ефекти:** Деривація (Spin Drift) , Аеродинамічний стрибок (Aero Jump), Вплив кроку та напрямку нарізів. 
-        * **Геометрія та Гравітація:** Гравітаційне падіння, Кут місця цілі (Rifleman's Rule), Висота прицілу.
-        * **Енергетика:** Кінетична енергія на траєкторії.
+        * **Атмосфера:** Щільність повітря, Температура пороху.
+        * **Аеродинаміка:** Опір (Drag), BC, G1/G7. 
+        * **Вітер:** Знесення (Lag Method), Вертикальний вплив. 
+        * **Гіроскоп:** Деривація , Аеро стрибок .
+        * **Геометрія:** Гравітація, Кут місця (Rifleman's Rule), Висота прицілу.
         """)
 
     with tab_chart:
         fig = make_subplots(rows=1, cols=1)
-        fig.add_trace(go.Scatter(x=df['Дистанція'], y=df['Падіння (см)'], name="Траєкторія", line=dict(color='#00ff00')))
-        fig.update_layout(template="plotly_dark", height=300, margin=dict(l=20, r=20, t=20, b=20))
+        fig.add_trace(go.Scatter(x=df['Дист.'], y=df['Падіння'], name="Траєкторія", line=dict(color='#00ff00')))
+        fig.update_layout(template="plotly_dark", height=300, margin=dict(l=10, r=10, t=10, b=10)) # Менші поля
         st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
