@@ -135,7 +135,7 @@ with st.expander("🚀 Параметри набою та зброї"):
     e_col1, e_col2, e_col3 = st.columns(3)
     v0 = e_col1.number_input("V0 (м/с)", 200, 1200, 961)
     bc = e_col2.number_input("BC", 0.01, 1.0, 0.395, format="%.3f")
-    model = e_col3.selectbox("Drag Model", ["G7", "G1"])
+    model = e_col3.selectbox("Drag Model", ["G1", "G7"])
     weight = e_col1.number_input("Вага (гран)", 1, 500, 200)
     zero_dist = e_col2.number_input("Пристрілка (м)", 1, 1000, 300)
     twist = e_col3.number_input("Твіст (дюйми)", 5.0, 20.0, 11.0)
