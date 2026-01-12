@@ -78,19 +78,15 @@ def run_simulation(p):
         y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
         
         # 6. Аеродинамічний стрибок (Aerodynamic Jump)
-        # Формула: const * W_cross * TwistDir
         aero_jump_mrad = 0.025 * w_cross * t_dir
-        aero_jump_cm = aero_jump_mrad * (d / 10) # переклад в см на дистанції
+        aero_jump_cm = aero_jump_mrad * (d / 10) 
         y_m += (aero_jump_cm / 100)
         
         # 7. Горизонтальне знесення (Lag Method)
-        # Використовуємо v0_corr (істинна V0), бо лаг рахується від вакуумного часу
         wind_drift = w_cross * (t - (d/v0_corr)) if d > 0 else 0
         
-        # 8. Деривація (Spin Drift) [ВИПРАВЛЕНО]
-        # Було: (twist / 10). Стало: (10 / twist). 
-        # Швидший твіст (менше число) -> Більший обертовий момент -> Більший знос.
-        # Множник -1, бо для Правого твіста знос йде ВПРАВО (в мінус по нашій шкалі)
+        # 8. Деривація (Spin Drift)
+        # 10 / twist - правильна залежність (менший твіст -> більше обертання)
         derivation = -1 * 0.05 * (10 / p['twist']) * (d / 100)**2 * t_dir if d > 0 else 0
         
         # Швидкість та Енергія на дистанції
@@ -108,9 +104,12 @@ def run_simulation(p):
         c_v = abs(val_v / click_val)
         c_h = abs(val_h / click_val)
 
-        # Індикація напрямку
+        # Індикація напрямку (КОРЕКЦІЯ)
+        # Якщо куля нижче (y_m < 0), крутимо ВВЕРХ (UP)
         dir_v = "⬆️ UP" if y_m < 0 else "⬇️ DN"
-        dir_h = "⬅️ L" if mrad_h_raw > 0 else "➡️ R"
+        
+        # ВИПРАВЛЕНО: Якщо знесення > 0 (це ВЛІВО), поправка має бути ВПРАВО (R)
+        dir_h = "➡️ R" if mrad_h_raw > 0 else "⬅️ L"
 
         results.append({
             "Дистанція": d,
