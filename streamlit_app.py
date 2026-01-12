@@ -142,7 +142,7 @@ def run_simulation(p):
 
 # --- ІНТЕРФЕЙС ---
 
-st.markdown("<h1>🎯 MAGELAN242 <span style='font-size:0.5em; color:#00ff41'>БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>🎯 БАЛІСТИЧНИЙ КАЛЬКУЛЯТОР <span style='font-size:0.5em; color:#00ff41'>by Magelan242</span></h1>", unsafe_allow_html=True)
 
 with st.container():
     c1, c2 = st.columns([2, 1])
