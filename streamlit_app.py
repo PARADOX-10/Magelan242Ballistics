@@ -23,6 +23,7 @@ st.markdown("""
         font-size: 1.8rem !important;
         color: #00ff00 !important;
     }
+    .stTable { font-size: 14px; }
     @media print {
         .stButton, .stTabs, .sidebar, [data-testid="stSidebar"] { display: none !important; }
         .main { background-color: white !important; color: black !important; }
@@ -31,9 +32,14 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def run_simulation(p):
+    # 1. Корекція V0 по температурі
     v0_corr = p['v0'] + (p['temp'] - 15) * p['t_coeff']
+    
+    # 2. Щільність повітря (Ideal Gas Law)
     tk = p['temp'] + 273.15
     rho = (p['pressure'] * 100) / (287.05 * tk)
+    
+    # 3. Балістичний коефіцієнт (Pejsa approximation const)
     k_drag = 0.5 * rho * (1/p['bc']) * 0.00052
     if p['model'] == "G7": k_drag *= 0.91
 
@@ -42,68 +48,68 @@ def run_simulation(p):
     weight_kg = p['weight_gr'] * 0.0000647989
     angle_rad = math.radians(p['angle'])
     
-    # 12 год = 0/360 град, 3 год = 90 град.
+    # Вітер: розкладання вектора
     wind_rad = math.radians(p['w_dir'] * 30)
-    
-    # Cos(90) = 0 (поперечний), Cos(0) = 1 (зустрічний)
-    w_long = p['w_speed'] * math.cos(wind_rad)
-    # Sin(90) = 1 (вітер справа -> дме вліво), Sin(270) = -1 (вітер зліва -> дме вправо)
-    w_cross = p['w_speed'] * math.sin(wind_rad)
+    w_long = p['w_speed'] * math.cos(wind_rad) # Зустрічний/Попутний
+    w_cross = p['w_speed'] * math.sin(wind_rad) # Боковий
 
     MOA_PER_MRAD = 3.4377
     is_moa = "MOA" in p['turret_unit']
     click_val = 0.25 if is_moa else 0.1
     
-    # 1 = Правий, -1 = Лівий
+    # Напрямок твіста: 1 = Right, -1 = Left
     t_dir = 1 if p['twist_dir'] == "Right (Правий)" else -1
 
     for d in range(0, p['max_dist'] + 1, 5):
+        # 4. Час польоту (враховує зміну швидкості відносно землі через зустрічний вітер)
         v0_eff = v0_corr - w_long 
         
+        # Формула Pejsa для часу
         t = d / (v0_eff * math.exp(-k_drag * d / 2)) if d > 0 else 0
+        
+        # 5. Гравітаційне падіння (з Rifleman's rule для кута)
         drop = 0.5 * g * (t**2) * math.cos(angle_rad)
         
+        # Розрахунок пристрілки (Zeroing)
         t_zero = p['zero_dist'] / (v0_corr * math.exp(-k_drag * p['zero_dist'] / 2))
         drop_zero = 0.5 * g * (t_zero**2)
         
+        # Висота траєкторії відносно лінії прицілювання
         y_m = -(drop - (drop_zero + p['sh']/100) * (d / p['zero_dist']) + p['sh']/100)
         
-        # --- Аеродинамічний стрибок ---
-        # Правий твіст + Вітер справа (w_cross > 0) -> Стрибок ВГОРУ (+)
+        # 6. Аеродинамічний стрибок (Aerodynamic Jump)
+        # Формула: const * W_cross * TwistDir
         aero_jump_mrad = 0.025 * w_cross * t_dir
-        aero_jump_cm = aero_jump_mrad * (d / 10)
+        aero_jump_cm = aero_jump_mrad * (d / 10) # переклад в см на дистанції
         y_m += (aero_jump_cm / 100)
         
-        # --- Горизонтальне знесення ---
-        # w_cross > 0 (вітер справа) -> значення додатнє (зміщення вліво)
+        # 7. Горизонтальне знесення (Lag Method)
+        # Використовуємо v0_corr (істинна V0), бо лаг рахується від вакуумного часу
         wind_drift = w_cross * (t - (d/v0_corr)) if d > 0 else 0
         
-        # --- Деривація (ВИПРАВЛЕНО) ---
-        # Правий твіст (t_dir=1) має зносити ВПРАВО (це від'ємне значення у нашій системі)
-        # Тому додаємо множник -1
-        derivation = -1 * 0.05 * (p['twist'] / 10) * (d / 100)**2 * t_dir if d > 0 else 0
+        # 8. Деривація (Spin Drift) [ВИПРАВЛЕНО]
+        # Було: (twist / 10). Стало: (10 / twist). 
+        # Швидший твіст (менше число) -> Більший обертовий момент -> Більший знос.
+        # Множник -1, бо для Правого твіста знос йде ВПРАВО (в мінус по нашій шкалі)
+        derivation = -1 * 0.05 * (10 / p['twist']) * (d / 100)**2 * t_dir if d > 0 else 0
         
+        # Швидкість та Енергія на дистанції
         v_curr = v0_corr * math.exp(-k_drag * d)
         energy = (weight_kg * v_curr**2) / 2
         
+        # Переведення в кутові величини
         mrad_v_raw = (y_m * 100) / (d / 10) if d > 0 else 0
-        
-        # Сума знесення вітром (напр. вліво +) і деривації (напр. вправо -)
         mrad_h_raw = ((wind_drift + derivation) * 100) / (d / 10) if d > 0 else 0
 
+        # Конвертація в кліки
         val_v = mrad_v_raw * (MOA_PER_MRAD if is_moa else 1)
         val_h = mrad_h_raw * (MOA_PER_MRAD if is_moa else 1)
         
         c_v = abs(val_v / click_val)
         c_h = abs(val_h / click_val)
 
-        # Логіка стрілок
+        # Індикація напрямку
         dir_v = "⬆️ UP" if y_m < 0 else "⬇️ DN"
-        
-        # Якщо mrad_h_raw > 0 -> це зміщення ВЛІВО (L), крутимо R (або L, залежно як марковано)
-        # Зазвичай: якщо куля пішла вліво, треба крутити барабан "Right" (щоб змістити СТП вправо) або цілитися правіше.
-        # Але в інтерфейсах часто пишуть куди змістилася куля або куди робити винос.
-        # Тут: L = знесення вліво. R = знесення вправо.
         dir_h = "⬅️ L" if mrad_h_raw > 0 else "➡️ R"
 
         results.append({
