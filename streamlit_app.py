@@ -7,12 +7,12 @@ import math
 import time
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-st.set_page_config(page_title="Magelan242 HUD", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Magelan242 HUD UA", layout="wide", initial_sidebar_state="collapsed")
 
-# --- СУЧАСНИЙ UI / CSS МАГІЯ ---
+# --- СУЧАСНИЙ UI / CSS МАГІЯ (Стилі ті самі, адаптовані під кирилицю) ---
 st.markdown("""
     <style>
-        /* ІМПОРТ ШРИФТУ ROBOTO MONO (ТЕХНІЧНИЙ) */
+        /* ІМПОРТ ШРИФТУ ROBOTO MONO (Підтримує кирилицю) */
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
 
         /* ЗАГАЛЬНИЙ ФОН */
@@ -23,7 +23,7 @@ st.markdown("""
             color: #e0e0e0;
         }
 
-        /* АНІМАЦІЯ ПОЯВИ (FADE IN UP) */
+        /* АНІМАЦІЯ ПОЯВИ */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translate3d(0, 20px, 0); }
             to { opacity: 1; transform: translate3d(0, 0, 0); }
@@ -61,12 +61,12 @@ st.markdown("""
             text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
         }
         .hud-sub {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             color: #00ff41; /* Green Accent */
             margin-top: 5px;
         }
         
-        /* СТИЛІЗАЦІЯ ВВОДУ (INPUTS) */
+        /* СТИЛІЗАЦІЯ ВВОДУ */
         div[data-baseweb="input"] {
             background-color: #0e1117 !important;
             border: 1px solid #30363d !important;
@@ -165,32 +165,32 @@ def run_simulation(p):
         })
     return pd.DataFrame(results), v0_corr
 
-# --- UI ЛОГІКА ---
+# --- UI ЛОГІКА (УКРАЇНСЬКА МОВА) ---
 
 # Заголовок з іконкою
-st.markdown("<h1>🎯 MAGELAN-242 <span style='font-size:0.5em; color:#666'>TACTICAL HUD</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>🎯 MAGELAN-242 <span style='font-size:0.5em; color:#666'>ТАКТИЧНИЙ ІНТЕРФЕЙС</span></h1>", unsafe_allow_html=True)
 
 # Верхня панель (Швидкий доступ)
 col_dist, col_unit = st.columns([2, 1])
 with col_dist:
     dist_input = st.number_input("ДИСТАНЦІЯ ДО ЦІЛІ (Метри)", 10, 3000, 1200, step=10)
 with col_unit:
-    turret_unit = st.selectbox("СИСТЕМА", ["MRAD (0.1)", "MOA (1/4)"])
+    turret_unit = st.selectbox("СИСТЕМА (КЛІКИ)", ["MRAD (0.1)", "MOA (1/4)"])
 
 # Налаштування (Collapsible)
-with st.expander("🛠️ НАЛАШТУВАННЯ ЗБРОЇ (WEAPON CONFIG)"):
+with st.expander("🛠️ НАЛАШТУВАННЯ ЗБРОЇ"):
     c1, c2, c3 = st.columns(3)
     v0 = c1.number_input("V0 (м/с)", 200, 1500, 961)
-    bc = c2.number_input("BC (G1/G7)", 0.01, 2.0, 0.395, format="%.3f")
-    model = c3.selectbox("Drag Model", ["G1", "G7"], index=1)
-    weight = c1.number_input("Вага (гран)", 10, 1000, 200)
-    zero_dist = c2.number_input("Пристрілка (м)", 50, 1000, 300)
+    bc = c2.number_input("Балістичний Коеф. (BC)", 0.01, 2.0, 0.395, format="%.3f")
+    model = c3.selectbox("Драг-модель", ["G1", "G7"], index=1)
+    weight = c1.number_input("Вага кулі (гран)", 10, 1000, 200)
+    zero_dist = c2.number_input("Дист. пристрілки (м)", 50, 1000, 300)
     twist = c3.number_input("Твіст (дюйм)", 5.0, 20.0, 11.0)
     sh = c1.number_input("Висота прицілу (см)", 0.0, 15.0, 5.0)
-    t_coeff = c2.number_input("Термозалежність", 0.0, 5.0, 0.1)
-    twist_dir = c3.selectbox("Нарізи", ["Right (Правий)", "Left (Лівий)"])
+    t_coeff = c2.number_input("Термозалежність %", 0.0, 5.0, 0.1)
+    twist_dir = c3.selectbox("Напрямок нарізів", ["Right (Правий)", "Left (Лівий)"])
 
-with st.expander("🌪️ АТМОСФЕРА (ENVIRONMENT)"):
+with st.expander("🌪️ АТМОСФЕРА ТА УМОВИ"):
     c1, c2, c3 = st.columns(3)
     temp = c1.slider("Температура (°C)", -40, 60, 15)
     press = c2.number_input("Тиск (hPa)", 800, 1200, 1013)
@@ -204,9 +204,8 @@ params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp,
           'twist': twist, 'zero_dist': zero_dist, 'max_dist': dist_input, 'sh': sh, 
           't_coeff': t_coeff, 'turret_unit': turret_unit, 'twist_dir': twist_dir}
 
-# Імітація обробки даних (для ефекту "роботи комп'ютера")
-with st.spinner('CALCULATING BALLISTICS...'):
-    # time.sleep(0.2) # Можна розкоментувати для ефекту затримки
+# Імітація обробки даних
+with st.spinner('РОЗРАХУНОК БАЛІСТИКИ...'):
     df, v0_final = run_simulation(params)
     res = df.iloc[-1]
 
@@ -225,13 +224,13 @@ def create_card(label, value, sub, color="#00ff41"):
     """
 
 with hud1:
-    st.markdown(create_card("ELEVATION", res['UP/DN'], f"Drop: {int(res['Падіння'])} cm", "#ffcc00"), unsafe_allow_html=True)
+    st.markdown(create_card("ВЕРТИКАЛЬ", res['UP/DN'], f"Падіння: {int(res['Падіння'])} см", "#ffcc00"), unsafe_allow_html=True)
 with hud2:
-    st.markdown(create_card("WINDAGE", res['L/R'], "Spin & Aero Incld", "#ffcc00"), unsafe_allow_html=True)
+    st.markdown(create_card("ГОРИЗОНТАЛЬ", res['L/R'], "Врах. вітер та деривацію", "#ffcc00"), unsafe_allow_html=True)
 with hud3:
-    st.markdown(create_card("VELOCITY", int(res['V, м/с']), "m/s", "#00f3ff"), unsafe_allow_html=True)
+    st.markdown(create_card("ШВИДКІСТЬ", int(res['V, м/с']), "м/с", "#00f3ff"), unsafe_allow_html=True)
 with hud4:
-    st.markdown(create_card("ENERGY", int(res['E, Дж']), "Joules", "#ff3333"), unsafe_allow_html=True)
+    st.markdown(create_card("ЕНЕРГІЯ", int(res['E, Дж']), "Джоулі", "#ff3333"), unsafe_allow_html=True)
 
 # --- ГРАФІК ТА ТАБЛИЦЯ ---
 st.markdown("<br>", unsafe_allow_html=True)
@@ -257,7 +256,7 @@ with tab_graph:
     fig.add_trace(go.Scatter(
         x=x_data, y=y_arc,
         mode='lines',
-        name='Trajectory',
+        name='Траєкторія',
         line=dict(color='#00ff41', width=4, shape='spline'),
         fill='tozeroy',
         fillcolor='rgba(0, 255, 65, 0.1)'
@@ -267,7 +266,7 @@ with tab_graph:
     fig.add_trace(go.Scatter(
         x=[dist_at_max], y=[max_h_val],
         mode='markers+text',
-        text=[f"MAX: {max_h_val:.0f}cm"],
+        text=[f"МАКС: {max_h_val:.0f}см"],
         textposition="top center",
         textfont=dict(family="Roboto Mono", size=12, color="#ffcc00"),
         marker=dict(color='#ffcc00', size=12, symbol='cross')
@@ -281,19 +280,19 @@ with tab_graph:
         height=400,
         margin=dict(l=20, r=20, t=40, b=20),
         xaxis=dict(
-            title="DISTANCE (m)", 
+            title="ДИСТАНЦІЯ (м)", 
             gridcolor='#333', 
             zerolinecolor='#555'
         ),
         yaxis=dict(
-            title="HEIGHT (cm)", 
+            title="ВИСОТА (см)", 
             gridcolor='#333', 
             zerolinecolor='#555'
         ),
         hovermode="x unified"
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"ℹ️ Максимальний підйом (Max Ordinate): {max_h_val:.1f} см на {dist_at_max} м")
+    st.caption(f"ℹ️ Максимальний підйом траєкторії: {max_h_val:.1f} см на дистанції {dist_at_max} м")
 
 with tab_data:
     p_step = st.select_slider("КРОК ТАБЛИЦІ (м)", [10, 25, 50, 100], value=50)
@@ -303,11 +302,11 @@ with tab_data:
         use_container_width=True, 
         hide_index=True,
         column_config={
-            "Дист.": st.column_config.NumberColumn("DIST", format="%d m"),
-            "UP/DN": st.column_config.TextColumn("ELEV", help="Vertical Correction"),
-            "L/R": st.column_config.TextColumn("WIND", help="Horizontal Correction"),
-            "V, м/с": st.column_config.NumberColumn("VEL", format="%d"),
-            "E, Дж": st.column_config.NumberColumn("NRG", format="%d"),
-            "Падіння": st.column_config.NumberColumn("DROP", format="%d cm"),
+            "Дист.": st.column_config.NumberColumn("ДИСТ", format="%d м"),
+            "UP/DN": st.column_config.TextColumn("ВЕРТ", help="Поправка по вертикалі"),
+            "L/R": st.column_config.TextColumn("ГОР", help="Поправка по горизонталі"),
+            "V, м/с": st.column_config.NumberColumn("ШВ", format="%d", help="Швидкість (м/с)"),
+            "E, Дж": st.column_config.NumberColumn("ЕН", format="%d", help="Енергія (Дж)"),
+            "Падіння": st.column_config.NumberColumn("ПАД", format="%d см", help="Абсолютне падіння"),
         }
     )
