@@ -7,7 +7,7 @@ import base64
 import os
 
 # --- КОНФІГУРАЦІЯ ---
-st.set_page_config(page_title="Magelan242 Pro Elite", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Magelan242 Ultra V4.0", layout="wide", initial_sidebar_state="collapsed")
 
 def get_img_as_base64(file):
     try:
@@ -20,19 +20,22 @@ def get_img_as_base64(file):
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap');
-        .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; color: #e0e0e0; }
-        .header-container { border-bottom: 2px solid #00ff41; padding-bottom: 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px;}
-        .hud-card { background: rgba(20, 25, 30, 0.9); border-left: 4px solid #00ff41; border-radius: 12px; padding: 15px; text-align: center; margin-bottom: 10px; }
-        .hud-label { color: #888; font-size: 0.8rem; text-transform: uppercase; }
-        .hud-value { color: #fff; font-size: 2.2rem; font-weight: 700; }
-        .hud-sub { color: #00ff41; font-size: 0.85rem; }
+        .stApp { background-color: #040404; font-family: 'Roboto Mono', monospace; color: #e0e0e0; }
+        .header-container { border-bottom: 2px solid #00ff41; padding-bottom: 15px; margin-bottom: 25px; display: flex; align-items: center; gap: 20px;}
+        .hud-card { background: rgba(15, 20, 25, 0.95); border: 1px solid #333; border-left: 5px solid #00ff41; border-radius: 10px; padding: 15px; text-align: center; }
+        .hud-label { color: #888; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;}
+        .hud-value { color: #fff; font-size: 2rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,255,65,0.2); }
+        .hud-sub { color: #00ff41; font-size: 0.8rem; }
+        .stTabs [data-baseweb="tab"] { font-weight: 700; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ФІЗИЧНЕ ЯДРО (NUMERICAL SOLVER V3.0) ---
+# --- БАЛІСТИЧНЕ ЯДРО V4.0 ---
 def run_simulation(p):
-    g = 9.80665
-    dt = 0.0015 
+    # Константи
+    G = 9.80665
+    OMEGA_EARTH = 7.292115e-5 # Кутова швидкість Землі
+    DT = 0.0012 # Підвищена точність (1.2 мс)
     
     # Адаптація характеристик під вагу
     ref_weight = 175.0 
@@ -40,25 +43,37 @@ def run_simulation(p):
     v_muzzle += (p['temp'] - 15) * p['t_coeff'] 
     bc_eff = p['bc'] * (p['weight_gr'] / ref_weight) 
     
+    # Розрахунок щільності вологого повітря
     tk = p['temp'] + 273.15
-    rho_rel = ((p['pressure'] * 100) / (287.05 * tk)) / 1.225
+    # Тиск насиченої пари (SVP)
+    svp = 6.112 * math.exp((17.67 * p['temp']) / (p['temp'] + 243.5))
+    pv = svp * (p['humid'] / 100.0) # Парціальний тиск пари
+    pd = p['pressure'] - pv # Тиск сухого повітря
+    rho = (pd * 100 / (287.05 * tk)) + (pv * 100 / (461.5 * tk))
+    rho_rel = rho / 1.225
     c_speed = 331.3 * math.sqrt(tk / 273.15) 
-    
+
+    # Вектори середовища
+    lat_rad = math.radians(p['latitude'])
+    az_rad = math.radians(p['azimuth'])
     wind_rad = math.radians(p['w_dir'] * 30)
     w_cross = p['w_speed'] * math.sin(wind_rad)
-    w_long = p['w_speed'] * math.cos(wind_rad) 
-    
+    w_long = p['w_speed'] * math.cos(wind_rad)
+
+    # Гіроскопічна стабільність (Miller Stability Factor)
+    # Спрощена оцінка для Aero Jump та Spin Drift
+    s_g = (30 * p['weight_gr']) / ((p['twist']**2) * (p['caliber']**3) * (v_muzzle/600))
     t_dir = 1 if p['twist_dir'] == "Right (Правий)" else -1
-    aero_jump_mrad = (w_cross * 0.002) * t_dir
-    
+
+    # Обнулення
     t_approx = p['zero_dist'] / v_muzzle
-    drop_zero = 0.5 * g * (t_approx**2)
-    angle_zero = math.atan((drop_zero + p['sh']/100) / p['zero_dist'])
+    angle_zero = math.atan((0.5 * G * t_approx**2 + p['sh']/100) / p['zero_dist'])
     
     total_angle = angle_zero + math.radians(p['angle'])
-    t, dist, y = 0.0, 0.0, -p['sh']/100
+    t, dist, y, z = 0.0, 0.0, -p['sh']/100, 0.0
     vx = v_muzzle * math.cos(total_angle)
     vy = v_muzzle * math.sin(total_angle)
+    vz = 0.0 # Z - бокове відхилення
     
     weight_kg = p['weight_gr'] * 0.0000647989
     results = []
@@ -66,156 +81,127 @@ def run_simulation(p):
 
     while dist <= p['max_dist'] + 5:
         v_air_x = vx + w_long
-        v_air_total = math.sqrt(v_air_x**2 + vy**2)
-        mach = v_air_total / c_speed
+        v_total = math.sqrt(v_air_x**2 + vy**2 + vz**2)
+        mach = v_total / c_speed
         
+        # Cd Model
         if p['model'] == "G7":
             cd = 0.22 + 0.12 / (mach**1.5 + 0.1) if mach > 1 else 0.45 / (mach + 0.5)
         else:
             cd = 0.42 + 0.1 / (mach**2 + 0.1) if mach > 1 else 0.55
             
-        accel_drag = (0.5 * rho_rel * v_air_total**2 * cd * (1.0/bc_eff)) * 0.00105
-        ax = -(accel_drag * (v_air_x / v_air_total))
-        ay = -(accel_drag * (vy / v_air_total)) - g
+        accel_drag = (0.5 * rho_rel * v_total**2 * cd * (1.0/bc_eff)) * 0.00105
         
-        vx += ax * dt
-        vy += ay * dt
-        dist += vx * dt
-        y += vy * dt
-        t += dt
+        # --- ЕФЕКТ КОРІОЛІСА ---
+        coriolis_x = 0 # Вплив на дальність мізерний
+        # Вертикальний Коріоліс (Eötvös)
+        coriolis_y = 2 * OMEGA_EARTH * vx * math.cos(lat_rad) * math.sin(az_rad)
+        # Горизонтальний Коріоліс
+        coriolis_z = 2 * OMEGA_EARTH * (vy * math.cos(lat_rad) * math.cos(az_rad) - vx * math.sin(lat_rad))
+
+        # Сумарні прискорення
+        ax = -(accel_drag * (v_air_x / v_total))
+        ay = -(accel_drag * (vy / v_total)) - G + coriolis_y
+        az = -(accel_drag * (vz / v_total)) + coriolis_z
+        
+        # Інтегрування
+        vx += ax * DT
+        vy += ay * DT
+        vz += az * DT
+        dist += vx * DT
+        y += vy * DT
+        z += vz * DT
+        t += DT
         
         if dist >= step_check:
+            # Вітер + Спін-дрифт (залежить від стабільності Sg)
             wind_drift = w_cross * (t - (dist / v_muzzle))
-            spin_drift = -1 * 0.05 * (10 / p['twist']) * (dist / 100)**2 * t_dir
-            y_final = y + (aero_jump_mrad * dist / 100)
+            spin_drift = -1 * (0.06 * (dist/100)**2 * t_dir) / s_g
+            
+            # Aero Jump (вертикальний стрибок від вітру)
+            aero_jump = (w_cross * 0.002 * t_dir * dist / 100)
+            
+            y_final = y + aero_jump
+            z_final = z + wind_drift + spin_drift
             
             is_moa = "MOA" in p['turret_unit']
-            mrad_v = (y_final * 100) / (dist / 10) if dist > 0 else 0
-            mrad_h = ((wind_drift + spin_drift) * 100) / (dist / 10) if dist > 0 else 0
-            
             conv = 3.4377 if is_moa else 1.0
             click = 0.25 if is_moa else 0.1
+            
+            mrad_v = (y_final * 100) / (dist / 10) if dist > 0 else 0
+            mrad_h = (z_final * 100) / (dist / 10) if dist > 0 else 0
             
             results.append({
                 "Дист.": int(dist),
                 "UP/DN": f"{'⬆️' if mrad_v > 0 else '⬇️'} {abs(mrad_v*conv/click):.1f}",
                 "L/R": f"{'➡️' if mrad_h > 0 else '⬅️'} {abs(mrad_h*conv/click):.1f}",
-                "V, м/с": int(v_air_total),
+                "V, м/с": int(v_total),
                 "Mach": round(mach, 2),
-                "E, Дж": int(0.5 * weight_kg * v_air_total**2),
-                "Падіння": y_final * 100
+                "E, Дж": int(0.5 * weight_kg * v_total**2),
+                "Drop": y_final * 100,
+                "Sg": round(s_g, 2)
             })
             step_check += 10
 
     return pd.DataFrame(results), v_muzzle, bc_eff
 
 # --- ІНТЕРФЕЙС ---
-logo_html = f'<img src="data:image/png;base64,{get_img_as_base64("logo.png")}" style="width:80px;">' if os.path.exists("logo.png") else '🎯'
+st.markdown('<div class="header-container"><div class="header-title">Magelan242 ULTRA<span class="header-sub">Scientific Numerical Solver V4.0</span></div></div>', unsafe_allow_html=True)
 
-st.markdown(f"""<div class="header-container">{logo_html}<div class="header-title">Magelan242 Elite<span class="header-sub">Restored Visuals V3.1</span></div></div>""", unsafe_allow_html=True)
+tab_calc, tab_env, tab_gun = st.tabs(["🚀 ОБЧИСЛЕННЯ", "🌍 СЕРЕДОВИЩЕ", "🔫 КОМПЛЕКС"])
 
-with st.container():
-    c1, c2 = st.columns([2, 1])
-    with c1: dist_input = st.number_input("ДИСТАНЦІЯ (м)", 100, 3000, 1000, step=50)
-    with c2: turret_unit = st.selectbox("ОДИНИЦІ", ["MRAD", "MOA"])
-
-tab_env, tab_gun, tab_vis = st.tabs(["🌪️ УМОВИ", "🔫 ЗБРОЯ", "📈 АНАЛІЗ"])
-
-# ... (Введення параметрів аналогічне попереднім версіям) ...
 with tab_env:
-    ec1, ec2 = st.columns(2)
-    with ec1:
-        w_speed = st.number_input("Вітер (м/с)", 0.0, 20.0, 3.0)
-        w_dir = st.number_input("Напрям (год)", 1, 12, 3)
-        angle = st.number_input("Кут цілі (°)", -60, 60, 0)
-    with ec2:
-        temp = st.number_input("Темп. (°C)", -30, 50, 15)
-        press = st.number_input("Тиск (hPa)", 800, 1150, 1013)
+    e1, e2 = st.columns(2)
+    with e1:
+        temp = st.slider("Температура (°C)", -30, 50, 15)
+        humid = st.slider("Вологість (%)", 0, 100, 50)
+        press = st.number_input("Тиск (hPa)", 800, 1100, 1013)
+    with e2:
+        lat = st.number_input("Широта (0-90°)", 0, 90, 50, help="Україна ~50°")
+        azimuth = st.slider("Азимут вогню (°)", 0, 360, 90, help="0-Пн, 90-Сх")
+        w_s = st.number_input("Вітер (м/с)", 0.0, 20.0, 3.0)
+        w_d = st.slider("Напрям вітру (год)", 1, 12, 3)
 
 with tab_gun:
-    gc1, gc2 = st.columns(2)
-    with gc1:
-        v0 = st.number_input("V0 (м/с)", 300, 1200, 820)
-        bc = st.number_input("BC", 0.1, 1.2, 0.505, format="%.3f")
-        model = st.radio("Модель", ["G1", "G7"], horizontal=True, index=1)
-    with gc2:
-        weight = st.number_input("Вага (гран)", 40, 400, 175)
-        twist = st.number_input("Твіст", 7.0, 14.0, 10.0)
+    g1, g2 = st.columns(2)
+    with g1:
+        v0 = st.number_input("V0 еталон (м/с)", 300, 1300, 820)
+        bc = st.number_input("BC еталон", 0.1, 1.2, 0.505, format="%.3f")
+        model = st.radio("Модель", ["G1", "G7"], index=1, horizontal=True)
+        weight = st.number_input("Вага кулі (гран)", 40, 400, 175)
+    with g2:
+        caliber = st.number_input("Калібр (дюйм)", 0.22, 0.50, 0.308, step=0.001)
+        twist = st.number_input("Твіст (дюйм)", 6.0, 15.0, 10.0)
+        zero = st.number_input("Пристрілка (м)", 50, 600, 100)
         sh = st.number_input("Вис. прицілу (см)", 3.0, 12.0, 5.0)
-        zero_dist = st.number_input("Нуль (м)", 50, 600, 100)
-        twist_dir = st.radio("Нарізи", ["Right (Правий)", "Left (Лівий)"], horizontal=True)
-        t_coeff = st.number_input("Термо %", 0.0, 2.0, 0.1)
 
-# ОБЧИСЛЕННЯ
-p = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 'pressure': press, 
-     'w_speed': w_speed, 'w_dir': w_dir, 'angle': angle, 'twist': twist, 'zero_dist': zero_dist, 
-     'max_dist': dist_input, 'sh': sh, 't_coeff': t_coeff, 'turret_unit': turret_unit, 'twist_dir': twist_dir}
+with tab_calc:
+    c1, c2 = st.columns([2, 1])
+    with c1: dist_max = st.number_input("ДИСТАНЦІЯ (м)", 100, 3000, 1000)
+    with c2: turret = st.selectbox("СІТКА", ["MRAD", "MOA"])
 
-df, v_final, bc_final = run_simulation(p)
-res = df.iloc[-1]
+    # ЗАПУСК
+    p = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 'pressure': press, 
+         'humid': humid, 'latitude': lat, 'azimuth': azimuth, 'w_speed': w_s, 'w_dir': w_d, 
+         'angle': 0, 'twist': twist, 'caliber': caliber, 'zero_dist': zero, 'max_dist': dist_max, 
+         'sh': sh, 't_coeff': 0.1, 'turret_unit': turret, 'twist_dir': "Right (Правий)"}
 
-# HUD
-st.markdown("<br>", unsafe_allow_html=True)
-r1, r2 = st.columns(2)
-r1.markdown(f'<div class="hud-card"><div class="hud-label">ВЕРТИКАЛЬ</div><div class="hud-value" style="color:#ffcc00">{res["UP/DN"]}</div><div class="hud-sub">Падіння: {int(res["Падіння"])} см</div></div>', unsafe_allow_html=True)
-r2.markdown(f'<div class="hud-card"><div class="hud-label">ГОРИЗОНТАЛЬ</div><div class="hud-value" style="color:#ffcc00">{res["L/R"]}</div><div class="hud-sub">Вітер + Дер.</div></div>', unsafe_allow_html=True)
-
-# ГРАФІКИ (ПОВЕРНЕННЯ ОРИГІНАЛЬНОГО СТИЛЮ)
-with tab_vis:
-    st.markdown("### 📉 Траєкторія польоту")
-    
-    y_data = df['Падіння'].values
-    x_data = df['Дист.'].values
-    
-    # Розрахунок дуги (лінеаризація відносно лінії прицілювання)
-    y_shifted = y_data - y_data[0]
-    slope = -y_shifted[-1] / x_data[-1] if x_data[-1] > 0 else 0
-    y_arc = y_shifted + slope * x_data
-    
-    max_h_val = np.max(y_arc)
-    max_h_idx = np.argmax(y_arc)
-    dist_at_max = x_data[max_h_idx]
-    drop_at_target = y_data[-1]
-
-    fig = go.Figure()
-
-    # Зелена дуга (Траєкторія)
-    fig.add_trace(go.Scatter(
-        x=x_data, y=y_arc, mode='lines', name='Траєкторія',
-        line=dict(color='#00ff41', width=3),
-        fill='tozeroy', fillcolor='rgba(0, 255, 65, 0.1)'
-    ))
-
-    # Жовта точка (Макс. висота)
-    fig.add_trace(go.Scatter(
-        x=[dist_at_max], y=[max_h_val], mode='markers+text',
-        text=[f"МАКС: {max_h_val:.1f} см"], textposition="top center",
-        marker=dict(color='#ffcc00', size=10, symbol='diamond')
-    ))
-
-    # Червоний хрест (Абсолютне падіння)
-    fig.add_trace(go.Scatter(
-        x=[x_data[-1]], y=[drop_at_target], mode='markers+text',
-        text=[f"Без попр: {drop_at_target:.0f} см"], textposition="bottom center",
-        marker=dict(color='#ff3333', size=12, symbol='x')
-    ))
-    
-    # Трансзвукова зона (Mach 1.2)
-    transonic = df[df['Mach'] <= 1.2]
-    if not transonic.empty:
-        m_dist = transonic.iloc[0]['Дист.']
-        fig.add_vline(x=m_dist, line_dash="dash", line_color="#ff00ff", 
-                      annotation_text="ТРАНСЗВУК", annotation_position="top left")
-
-    fig.update_layout(
-        template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)',
-        height=400, margin=dict(l=10, r=10, t=20, b=10), showlegend=False,
-        xaxis=dict(title="Відстань (м)", gridcolor='#333'),
-        yaxis=dict(title="Висота/Падіння (см)", gridcolor='#333')
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    df, v_final, bc_final = run_simulation(p)
+    res = df.iloc[-1]
 
     st.markdown("---")
-    st.markdown("### 📋 Таблиця поправок")
-    step = st.select_slider("Крок таблиці", [25, 50, 100], 100)
+    h1, h2, h3, h4 = st.columns(4)
+    h1.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль</div><div class="hud-value">{res["UP/DN"]}</div><div class="hud-sub">Кліків</div></div>', unsafe_allow_html=True)
+    h2.markdown(f'<div class="hud-card"><div class="hud-label">Горизонт</div><div class="hud-value">{res["L/R"]}</div><div class="hud-sub">Коріоліс+Вітер</div></div>', unsafe_allow_html=True)
+    h3.markdown(f'<div class="hud-card"><div class="hud-label">Швидкість</div><div class="hud-value">{res["V, м/с"]} м/с</div><div class="hud-sub">Mach {res["Mach"]}</div></div>', unsafe_allow_html=True)
+    h4.markdown(f'<div class="hud-card"><div class="hud-label">Стабільність</div><div class="hud-value">{res["Sg"]}</div><div class="hud-sub"> Miller Sg</div></div>', unsafe_allow_html=True)
+
+    # Графік
+    st.markdown("### 📉 Аналіз траєкторії")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df['Дист.'], y=df['Drop'], mode='lines', name='Trajectory', line=dict(color='#00ff41', width=3)))
+    fig.update_layout(template="plotly_dark", height=350, margin=dict(l=0,r=0,t=10,b=0), xaxis_title="Метри", yaxis_title="Падіння (см)")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    step = st.select_slider("Крок таблиці", [50, 100], 100)
     st.dataframe(df[df['Дист.'] % step == 0], use_container_width=True, hide_index=True)
