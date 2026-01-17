@@ -9,6 +9,23 @@ import os
 # --- КОНФІГУРАЦІЯ ---
 st.set_page_config(page_title="Magelan242 Ultra Ultimate", layout="wide", initial_sidebar_state="collapsed")
 
+# --- БАЗА ДАНИХ КУЛЬ (Назва: [Калібр", Вага гран", BC G7", Модель"]) ---
+BULLET_DB = {
+    "Custom Bullet (Ручне введення)": None,
+    ".223 Rem: Sierra TMK 77gr": [0.224, 77, 0.200, "G7"],
+    ".223 Rem: Hornady BTHP 75gr": [0.224, 75, 0.183, "G7"],
+    "6.5 CM: Hornady ELD-M 140gr": [0.264, 140, 0.326, "G7"],
+    "6.5 CM: Lapua Scenar-L 136gr": [0.264, 136, 0.274, "G7"],
+    "6.5 CM: Berger Hybrid 140gr": [0.264, 140, 0.311, "G7"],
+    ".308 Win: Lapua Scenar 167gr": [0.308, 167, 0.216, "G7"],
+    ".308 Win: Hornady ELD-M 178gr": [0.308, 178, 0.275, "G7"],
+    ".308 Win: Sierra SMK 175gr": [0.308, 175, 0.243, "G7"],
+    ".300 WM: Berger Hybrid 215gr": [0.308, 215, 0.354, "G7"],
+    ".338 LM: Lapua Scenar 300gr": [0.338, 300, 0.368, "G7"],
+    ".338 LM: Hornady ELD-M 285gr": [0.338, 285, 0.407, "G7"],
+    ".50 BMG: Hornady A-MAX 750gr": [0.510, 750, 0.511, "G7"]
+}
+
 def get_img_as_base64(file):
     try:
         with open(file, "rb") as f:
@@ -31,51 +48,33 @@ st.markdown("""
 
 # --- БАЛІСТИЧНЕ ЯДРО: ПОВНИЙ ВЕКТОРНИЙ RK4 ---
 def get_derivatives(state, p):
-    # state: [x, y, z, vx, vy, vz]
     _, _, _, vx, vy, vz = state
-    
-    # Константи
-    G = 9.80665
-    OMEGA_E = 7.292115e-5
-    
-    # Вектор відносної швидкості (Bullet velocity - Wind velocity)
-    v_rel_x = vx + p['w_long']
-    v_rel_y = vy
-    v_rel_z = vz + p['w_cross']
-    
+    G, OMEGA_E = 9.80665, 7.292115e-5
+    v_rel_x, v_rel_y, v_rel_z = vx + p['w_long'], vy, vz + p['w_cross']
     v_total_rel = math.sqrt(v_rel_x**2 + v_rel_y**2 + v_rel_z**2)
     mach = v_total_rel / p['c_speed']
     
-    # Модель опору
     if p['model'] == "G7":
         cd = 0.22 + 0.12 / (mach**1.5 + 0.1) if mach > 1 else 0.45 / (mach + 0.5)
     else:
         cd = 0.42 + 0.1 / (mach**2 + 0.1) if mach > 1 else 0.55
         
-    # Сила опору (акселерація)
     accel_drag = (0.5 * p['rho_rel'] * v_total_rel**2 * cd * (1.0/p['bc_eff'])) * 0.00105
-    
-    # Коріоліс
     cor_y = 2 * OMEGA_E * vx * math.cos(p['lat_rad']) * math.sin(p['az_rad'])
     cor_z = 2 * OMEGA_E * (vy * math.cos(p['lat_rad']) * math.cos(p['az_rad']) - vx * math.sin(p['lat_rad']))
 
-    # Похідні
-    dx = vx
-    dy = vy
-    dz = vz
+    dx, dy, dz = vx, vy, vz
     dvx = -(accel_drag * (v_rel_x / v_total_rel))
     dvy = -(accel_drag * (v_rel_y / v_total_rel)) - G + cor_y
     dvz = -(accel_drag * (v_rel_z / v_total_rel)) + cor_z
-    
     return np.array([dx, dy, dz, dvx, dvy, dvz])
 
 def run_simulation(p):
-    DT = 0.0015 # Оптимальний крок
+    DT = 0.0015
     ref_w = 175.0
     v0_eff = p['v0'] * math.sqrt(ref_w / p['weight_gr']) + (p['temp'] - 15) * p['t_coeff']
     bc_eff = p['bc'] * (p['weight_gr'] / ref_w)
     
-    # Атмосфера
     tk = p['temp'] + 273.15
     svp = 6.112 * math.exp((17.67 * p['temp']) / (p['temp'] + 243.5))
     pv = svp * (p['humid'] / 100.0)
@@ -93,30 +92,23 @@ def run_simulation(p):
     t_dir = 1 if p['twist_dir'] == "Right (Правий)" else -1
     angle_zero = math.atan((0.5 * 9.80665 * (p['zero_dist']/v0_eff)**2 + p['sh']/100) / p['zero_dist'])
     
-    # Стан: [x, y, z, vx, vy, vz]
     state = np.array([0.0, -p['sh']/100, 0.0, v0_eff * math.cos(angle_zero), v0_eff * math.sin(angle_zero), 0.0])
     t, dist, results_list = 0.0, 0.0, []
     step_check = 0
 
     while dist <= p['max_dist'] + 5:
-        # Runge-Kutta 4th Order
         k1 = get_derivatives(state, p_phys)
         k2 = get_derivatives(state + k1 * DT / 2, p_phys)
         k3 = get_derivatives(state + k2 * DT / 2, p_phys)
         k4 = get_derivatives(state + k3 * DT, p_phys)
         state = state + (k1 + 2*k2 + 2*k3 + k4) * DT / 6
-        
-        t += DT
-        dist = state[0]
+        t += DT; dist = state[0]
         
         if dist >= step_check:
             v_curr = math.sqrt(state[3]**2 + state[4]**2 + state[5]**2)
-            # Спін-дрифт та Aero Jump додаються як корекції
             s_drift = -1 * (0.06 * (dist/100)**2 * t_dir) / s_g
             aero_jump = (p_phys['w_cross'] * 0.002 * t_dir * dist / 100)
-            
             y_f, z_f = state[1] + aero_jump, state[2] + s_drift
-            
             mv, mh = (y_f * 100) / (dist / 10) if dist > 0 else 0, (z_f * 100) / (dist / 10) if dist > 0 else 0
             
             results_list.append({
@@ -124,31 +116,25 @@ def run_simulation(p):
                 "Падіння": y_f * 100, "MRAD_V": mv, "MRAD_H": mh, "Sg": round(s_g, 2)
             })
             step_check += 10
-            
     return pd.DataFrame(results_list)
 
 # --- ВІЗУАЛІЗАЦІЯ СІТКИ ---
 def draw_reticle(mrad_v, mrad_h, unit_name):
     limit = 10 if "MRAD" in unit_name else 35
     fig = go.Figure()
-    # Сітка
     for i in range(-limit, limit + 1, 2 if limit > 15 else 1):
         fig.add_shape(type="line", x0=i, y0=-0.3, x1=i, y1=0.3, line=dict(color="rgba(255,255,255,0.2)"))
         fig.add_shape(type="line", x0=-0.3, y0=i, x1=0.3, y1=i, line=dict(color="rgba(255,255,255,0.2)"))
-    
     fig.add_shape(type="line", x0=-limit, y0=0, x1=limit, y1=0, line=dict(color="white", width=2))
     fig.add_shape(type="line", x0=0, y0=-limit, x1=0, y1=limit, line=dict(color="white", width=2))
-    
-    # Точка влучання (винос)
     fig.add_trace(go.Scatter(x=[-mrad_h], y=[mrad_v], mode='markers', marker=dict(color='#00ff41', size=14, symbol='circle-open', line=dict(width=3))))
-
-    fig.update_layout(template="plotly_dark", height=450, width=450, xaxis=dict(range=[-limit, limit], zeroline=False), yaxis=dict(range=[-limit, limit], zeroline=False), showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)')
+    fig.update_layout(template="plotly_dark", height=450, width=450, showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)')
     return fig
 
 # --- UI INTERFACE ---
-st.markdown('<div class="header-container"><div style="font-size:2rem;">🎯</div><div class="header-title">Magelan242 ULTRA<span class="header-sub">Ultimate V4.5 Full Vector RK4</span></div></div>', unsafe_allow_html=True)
+st.markdown('<div class="header-container"><div style="font-size:2rem;">🎯</div><div class="header-title">Magelan242 ULTRA<span class="header-sub">Ultimate V4.6 | Bullet DB Edition</span></div></div>', unsafe_allow_html=True)
 
-t_res, t_env, t_gun, t_ret = st.tabs(["🚀 ОБЧИСЛЕННЯ", "🌍 СЕРЕДОВИЩЕ", "🔫 КОМПЛЕКС", "🔭 СІТКА"])
+t_res, t_env, t_gun, t_ret = st.tabs(["🚀 ОБЧИСЛЕННЯ", "🌍 СЕРЕДОВИЩЕ", "🔫 ЗБРОЯ", "🔭 СІТКА"])
 
 with t_env:
     col1, col2 = st.columns(2)
@@ -163,35 +149,31 @@ with t_env:
         w_dir = st.slider("Напрям вітру (год)", 1, 12, 3)
 
 with t_gun:
+    # --- ВИБІР КУЛІ З БАЗИ ---
+    bullet_choice = st.selectbox("ОБЕРІТЬ КУЛЮ (DATABASE)", list(BULLET_DB.keys()))
+    db_val = BULLET_DB[bullet_choice]
+    
     col1, col2 = st.columns(2)
     with col1:
+        # Автозаповнення або ручне введення
         v0 = st.number_input("V0 (м/с)", 300, 1300, 820)
-        bc = st.number_input("BC", 0.1, 1.2, 0.505, format="%.3f")
-        weight = st.number_input("Вага (гран)", 40, 400, 175)
-        model = st.radio("Драг-модель", ["G1", "G7"], index=1, horizontal=True)
+        weight = st.number_input("Вага (гран)", 40, 600, db_val[1] if db_val else 175)
+        bc = st.number_input("BC (Балістичний коефіцієнт)", 0.1, 1.2, db_val[2] if db_val else 0.505, format="%.3f")
+        model = st.radio("Драг-модель", ["G1", "G7"], index=1 if not db_val or db_val[3]=="G7" else 0, horizontal=True)
     with col2:
-        caliber = st.number_input("Калібр (дюйм)", 0.220, 0.500, 0.308, step=0.001)
-        twist = st.number_input("Твіст (дюйм)", 6.0, 15.0, 10.0)
+        caliber = st.number_input("Калібр (дюйм)", 0.220, 0.510, db_val[0] if db_val else 0.308, step=0.001)
+        twist = st.number_input("Твіст (дюйм)", 6.0, 16.0, 10.0)
         sh = st.number_input("Вис. прицілу (см)", 2.0, 15.0, 5.0)
         zero = st.number_input("Пристрілка (м)", 50, 600, 100)
+        twist_dir = st.radio("Напрям нарізів", ["Right (Правий)", "Left (Лівий)"], horizontal=True)
 
 with t_res:
     dist_max = st.number_input("ДИСТАНЦІЯ ЦІЛІ (м)", 100, 3000, 1000, step=50)
     unit = st.selectbox("СІТКА", ["MRAD", "MOA"])
-    
-    # Збір параметрів
-    params = {
-        'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 
-        'pressure': press, 'humid': humid, 'latitude': lat, 'azimuth': azimuth, 
-        'w_speed': w_speed, 'w_dir': w_dir, 'angle': 0, 'twist': twist, 
-        'caliber': caliber, 'zero_dist': zero, 'max_dist': dist_max, 'sh': sh, 
-        't_coeff': 0.1, 'turret_unit': unit, 'twist_dir': "Right (Правий)"
-    }
+    params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 'pressure': press, 'humid': humid, 'latitude': lat, 'azimuth': azimuth, 'w_speed': w_speed, 'w_dir': w_dir, 'angle': 0, 'twist': twist, 'caliber': caliber, 'zero_dist': zero, 'max_dist': dist_max, 'sh': sh, 't_coeff': 0.1, 'turret_unit': unit, 'twist_dir': twist_dir}
 
     try:
-        df = run_simulation(params)
-        res = df.iloc[-1]
-        
+        df = run_simulation(params); res = df.iloc[-1]
         is_moa = "MOA" in unit
         conv = 3.4377 if is_moa else 1.0
         val_v, val_h = res['MRAD_V'] * conv, res['MRAD_H'] * conv
@@ -203,17 +185,10 @@ with t_res:
         h3.markdown(f'<div class="hud-card"><div class="hud-label">Швидкість</div><div class="hud-value">{res["V"]} м/с</div><div class="hud-sub">Mach {res["Mach"]}</div></div>', unsafe_allow_html=True)
         h4.markdown(f'<div class="hud-card"><div class="hud-label">Стабільність</div><div class="hud-value">{res["Sg"]}</div><div class="hud-sub">Miller Factor</div></div>', unsafe_allow_html=True)
 
-        # Траєкторія
-        st.markdown("### 📈 Графік траєкторії")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Дист.'], y=df['Падіння'], mode='lines', line=dict(color='#00ff41', width=3)))
-        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)')
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(go.Figure(data=[go.Scatter(x=df['Дист.'], y=df['Падіння'], mode='lines', line=dict(color='#00ff41', width=3))], layout=go.Layout(template="plotly_dark", height=400)), use_container_width=True)
         st.dataframe(df[df['Дист.'] % 100 == 0], use_container_width=True, hide_index=True)
-
     except Exception as e:
-        st.error(f"Помилка розрахунку: {e}")
+        st.error(f"Помилка: {e}")
 
 with t_ret:
-    st.markdown("### 🔭hold-over на сітці")
     st.plotly_chart(draw_reticle(val_v, val_h, unit), use_container_width=True)
