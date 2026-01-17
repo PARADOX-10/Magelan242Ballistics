@@ -25,6 +25,7 @@ st.markdown("""
         .hud-card { background: rgba(15, 20, 25, 0.95); border-left: 5px solid #00ff41; border-radius: 10px; padding: 15px; text-align: center; }
         .hud-label { color: #888; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;}
         .hud-value { color: #fff; font-size: 1.8rem; font-weight: 700; }
+        .hud-sub { color: #00ff41; font-size: 0.8rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -63,7 +64,8 @@ def run_simulation(p):
     p_phys = {
         'rho_rel': rho / 1.225, 'c_speed': 331.3 * math.sqrt(tk / 273.15),
         'bc_eff': bc_eff, 'model': p['model'], 'lat_rad': math.radians(p['latitude']),
-        'az_rad': math.radians(p['azimuth']), 'w_long': p['w_speed'] * math.cos(math.radians(p['w_dir'] * 30)),
+        'az_rad': math.radians(p['azimuth']), 
+        'w_long': p['w_speed'] * math.cos(math.radians(p['w_dir'] * 30)),
         'w_cross': p['w_speed'] * math.sin(math.radians(p['w_dir'] * 30))
     }
     s_g = (30 * p['weight_gr']) / ((p['twist']**2) * (p['caliber']**3) * (v0_eff/600))
@@ -90,7 +92,6 @@ def run_simulation(p):
             y_f = state[1] + (p_phys['w_cross'] * 0.002 * t_dir * dist / 100)
             z_f = state[2] + w_drift + s_drift
             
-            # Поправки в MRAD
             mv, mh = (y_f * 100) / (dist / 10) if dist > 0 else 0, (z_f * 100) / (dist / 10) if dist > 0 else 0
             
             results_list.append({
@@ -102,78 +103,108 @@ def run_simulation(p):
 
 # --- ФУНКЦІЯ ПРИЦІЛЬНОЇ СІТКИ ---
 def draw_reticle(mrad_v, mrad_h, unit_name):
-    # Візуалізація сітки (крок 1 одиниця)
     grid_range = 10 if "MRAD" in unit_name else 30
     fig = go.Figure()
     
     # Малюємо сітку
     for i in range(-grid_range, grid_range + 1):
-        fig.add_shape(type="line", x0=i, y0=-0.2, x1=i, y1=0.2, line=dict(color="rgba(255,255,255,0.3)", width=1))
-        fig.add_shape(type="line", x0=-0.2, y0=i, x1=0.2, y1=i, line=dict(color="rgba(255,255,255,0.3)", width=1))
+        fig.add_shape(type="line", x0=i, y0=-0.2, x1=i, y1=0.2, line=dict(color="rgba(255,255,255,0.2)", width=1))
+        fig.add_shape(type="line", x0=-0.2, y0=i, x1=0.2, y1=i, line=dict(color="rgba(255,255,255,0.2)", width=1))
 
-    # Основні осі
     fig.add_shape(type="line", x0=-grid_range, y0=0, x1=grid_range, y1=0, line=dict(color="white", width=2))
     fig.add_shape(type="line", x0=0, y0=-grid_range, x1=0, y1=grid_range, line=dict(color="white", width=2))
 
-    # ТОЧКА ВЛУЧАННЯ (Hold-over)
-    # Поправка 'UP' 5 mrad означає, що ми цілимося на 5 одиниць нижче центру
+    # Точка влучання (hold-over візуалізація)
     fig.add_trace(go.Scatter(
         x=[-mrad_h], y=[mrad_v], 
         mode='markers',
-        marker=dict(color='#00ff41', size=15, symbol='circle-open', line=dict(width=3, color='#00ff41')),
-        name='Impact Point'
+        marker=dict(color='#00ff41', size=15, symbol='circle-open', line=dict(width=3)),
+        hoverinfo='skip'
     ))
 
     fig.update_layout(
         template="plotly_dark", height=500, width=500,
-        xaxis=dict(range=[-grid_range, grid_range], zeroline=False, title=f"Horizontal ({unit_name})"),
-        yaxis=dict(range=[-grid_range, grid_range], zeroline=False, title=f"Vertical ({unit_name})"),
-        showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.5)'
+        xaxis=dict(range=[-grid_range, grid_range], zeroline=False, title=unit_name),
+        yaxis=dict(range=[-grid_range, grid_range], zeroline=False, title=unit_name),
+        showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)'
     )
     return fig
 
 # --- ІНТЕРФЕЙС ---
-st.markdown(f'<div class="header-container"><div style="font-size:2rem;">🎯</div><div class="header-title">Magelan242 ULTRA<span class="header-sub">V4.4 Hyper RK4 & Reticle View</span></div></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="header-container"><div style="font-size:2rem;">🎯</div><div class="header-title">Magelan242 ULTRA<span class="header-sub">V4.4 Hyper Precision RK4</span></div></div>', unsafe_allow_html=True)
 
 t_res, t_env, t_gun, t_ret = st.tabs(["🚀 ОБЧИСЛЕННЯ", "🌍 СЕРЕДОВИЩЕ", "🔫 КОМПЛЕКС", "🔭 СІТКА"])
 
-# ... (Блоки t_env та t_gun ідентичні V4.3 Hyper) ...
 with t_env:
     e1, e2 = st.columns(2)
     with e1:
-        temp = st.slider("Температура (°C)", -30, 50, 15); hum = st.slider("Вологість (%)", 0, 100, 50); press = st.number_input("Тиск (hPa)", 800, 1100, 1013)
+        temp = st.slider("Температура (°C)", -30, 50, 15)
+        hum = st.slider("Вологість (%)", 0, 100, 50)
+        press = st.number_input("Тиск (hPa)", 800, 1100, 1013)
     with e2:
-        lat = st.number_input("Широта", 0, 90, 50); az = st.slider("Азимут (°)", 0, 360, 90); w_s = st.number_input("Вітер (м/с)", 0.0, 20.0, 2.0); w_d = st.slider("Напрям (год)", 1, 12, 3)
+        lat = st.number_input("Широта", 0, 90, 50)
+        az = st.slider("Азимут (°)", 0, 360, 90)
+        w_s = st.number_input("Вітер (м/с)", 0.0, 20.0, 3.0)
+        w_d = st.slider("Напрям (год)", 1, 12, 3)
 
 with t_gun:
     g1, g2 = st.columns(2)
     with g1:
-        v0 = st.number_input("V0 еталон", 300, 1300, 820); bc = st.number_input("BC еталон", 0.1, 1.2, 0.505, format="%.3f"); weight = st.number_input("Вага (гран)", 40, 400, 175); model = st.radio("Модель", ["G1", "G7"], index=1, horizontal=True)
+        v0 = st.number_input("V0 еталон", 300, 1300, 820)
+        bc = st.number_input("BC еталон", 0.1, 1.2, 0.505, format="%.3f")
+        weight = st.number_input("Вага (гран)", 40, 400, 175)
+        model = st.radio("Модель", ["G1", "G7"], index=1, horizontal=True)
     with g2:
-        cal = st.number_input("Калібр (дюйм)", 0.22, 0.50, 0.308); twist = st.number_input("Твіст", 6.0, 15.0, 10.0); sh = st.number_input("Вис. прицілу (см)", 3.0, 12.0, 5.0); zero = st.number_input("Пристрілка (м)", 50, 600, 100)
+        cal = st.number_input("Калібр (дюйм)", 0.22, 0.50, 0.308, step=0.001)
+        twist = st.number_input("Твіст", 6.0, 15.0, 10.0)
+        sh = st.number_input("Вис. прицілу (см)", 3.0, 12.0, 5.0)
+        zero = st.number_input("Пристрілка (м)", 50, 600, 100)
 
 with t_res:
     dist_target = st.number_input("ДИСТАНЦІЯ (м)", 100, 3000, 1000, step=50)
-    unit = st.selectbox("ОДИНИЦІ", ["MRAD", "MOA"])
-    params = {'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 'temp': temp, 'pressure': press, 'humid': hum, 'latitude': lat, 'azimuth': azimuth, 'w_speed': w_s, 'w_dir': w_d, 'angle': 0, 'twist': twist, 'caliber': cal, 'zero_dist': zero, 'max_dist': dist_target, 'sh': sh, 't_coeff': 0.1, 'turret_unit': unit, 'twist_dir': "Right (Правий)"}
+    unit = st.selectbox("СІТКА", ["MRAD", "MOA"])
+    
+    # ПРАВИЛЬНИЙ ЗБІР ПАРАМЕТРІВ (СИНХРОНІЗАЦІЯ ІМЕН)
+    params = {
+        'v0': v0, 'bc': bc, 'model': model, 'weight_gr': weight, 
+        'temp': temp, 'pressure': press, 'humid': hum, 
+        'latitude': lat, 'azimuth': az, 'w_speed': w_s, 'w_dir': w_d, 
+        'angle': 0, 'twist': twist, 'caliber': cal, 'zero_dist': zero, 
+        'max_dist': dist_target, 'sh': sh, 't_coeff': 0.1, 'turret_unit': unit, 
+        'twist_dir': "Right (Правий)"
+    }
 
-    df = run_simulation(params); res = df.iloc[-1]
-    
-    # Вивід результатів (HUD)
-    is_moa = "MOA" in unit
-    conv = 3.4377 if is_moa else 1.0
-    val_v, val_h = res['MRAD_V'] * conv, res['MRAD_H'] * conv
-    
-    st.markdown("---")
-    h1, h2, h3, h4 = st.columns(4)
-    h1.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль</div><div class="hud-value" style="color:#ffcc00">{"⬆️" if val_v > 0 else "⬇️"} {abs(val_v/(0.25 if is_moa else 0.1)):.1f}</div><div class="hud-sub">Кліків</div></div>', unsafe_allow_html=True)
-    h2.markdown(f'<div class="hud-card"><div class="hud-label">Горизонт</div><div class="hud-value" style="color:#ffcc00">{"➡️" if val_h > 0 else "⬅️"} {abs(val_h/(0.25 if is_moa else 0.1)):.1f}</div><div class="hud-sub">{unit}</div></div>', unsafe_allow_html=True)
-    h3.markdown(f'<div class="hud-card"><div class="hud-label">Швидкість</div><div class="hud-value">{res["V"]} м/с</div><div class="hud-sub">Mach {res["Mach"]}</div></div>', unsafe_allow_html=True)
-    h4.markdown(f'<div class="hud-card"><div class="hud-label">Стабільність</div><div class="hud-value">{res["Sg"]}</div><div class="hud-sub">Sg Factor</div></div>', unsafe_allow_html=True)
+    try:
+        df = run_simulation(params)
+        res = df.iloc[-1]
+        
+        is_moa = "MOA" in unit
+        conv = 3.4377 if is_moa else 1.0
+        val_v, val_h = res['MRAD_V'] * conv, res['MRAD_H'] * conv
+        
+        st.markdown("---")
+        h1, h2, h3, h4 = st.columns(4)
+        h1.markdown(f'<div class="hud-card"><div class="hud-label">Вертикаль</div><div class="hud-value" style="color:#ffcc00">{"⬆️" if val_v > 0 else "⬇️"} {abs(val_v/(0.25 if is_moa else 0.1)):.1f}</div><div class="hud-sub">Кліків</div></div>', unsafe_allow_html=True)
+        h2.markdown(f'<div class="hud-card"><div class="hud-label">Горизонт</div><div class="hud-value" style="color:#ffcc00">{"➡️" if val_h > 0 else "⬅️"} {abs(val_h/(0.25 if is_moa else 0.1)):.1f}</div><div class="hud-sub">{unit}</div></div>', unsafe_allow_html=True)
+        h3.markdown(f'<div class="hud-card"><div class="hud-label">Швидкість</div><div class="hud-value">{res["V"]} м/с</div><div class="hud-sub">Mach {res["Mach"]}</div></div>', unsafe_allow_html=True)
+        h4.markdown(f'<div class="hud-card"><div class="hud-label">Стабільність</div><div class="hud-value">{res["Sg"]}</div><div class="hud-sub">Miller Sg</div></div>', unsafe_allow_html=True)
+
+        # Траєкторія
+        st.markdown("### 📈 Траєкторія")
+        y_data, x_data = df['Падіння'].values, df['Дист.'].values
+        y_arc = (y_data - y_data[0]) + (- (y_data[-1] - y_data[0]) / x_data[-1] if x_data[-1] > 0 else 0) * x_data
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=x_data, y=y_arc, mode='lines', line=dict(color='#00ff41', width=3), fill='tozeroy', fillcolor='rgba(0,255,65,0.1)'))
+        fig.add_trace(go.Scatter(x=[x_data[-1]], y=[y_data[-1]], mode='markers+text', text=[f"DROP: {y_data[-1]:.0f}см"], textposition="bottom center", marker=dict(color='#ff3333', size=12, symbol='x')))
+        
+        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,15,20,0.5)')
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Помилка розрахунку: {e}")
 
 with t_ret:
-    st.markdown("### 🔭 Візуалізація виносу (Hold-over)")
-    # Малюємо сітку для поточної дистанції
+    st.markdown("### 🔭 Візуалізація сітки (Hold-over)")
     fig_reticle = draw_reticle(val_v, val_h, unit)
     st.plotly_chart(fig_reticle, use_container_width=True)
-    st.caption(f"ℹ️ Зелене коло показує, куди треба 'навести' центр сітки або де буде влучання при цілевказанні центром.")
